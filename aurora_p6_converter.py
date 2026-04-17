@@ -9,12 +9,23 @@ The two-pass workaround:
   Pass 1 - P6_Import_pass1.xml   Import action: Create New Project
     Contains: Calendar/OBS/Currency/Role/RoleRate (required global refs)
               Resource, ActivityCodeType, ActivityCode (top-level)
-              Project -> WBS, Activity, ResourceAssignment  (NO Relationships)
+              Project -> WBS, Activity  (NO Relationships, NO ResourceAssignments)
 
   Pass 2 - P6_Import_pass2.xml   Import action: Update Existing Project
     Contains: Calendar/OBS/Currency/Role/RoleRate
               Project -> Activity (same ObjectIds as pass 1), Relationship
-              (NO WBS - already created in pass 1)
+              (NO WBS, NO ResourceAssignments)
+
+  Pass 3 - P6_Import_pass3.xml   Import action: Update Existing Project
+    Contains: Calendar/OBS/Currency/Role/RoleRate
+              Project -> Activity (same ObjectIds), ResourceAssignment
+              (NO WBS, NO Relationships)
+
+  P6 18.8 FK constraint behaviour:
+    fk_taskpred_task / fk_taskpred_task_2  (TASKPRED) - relationships need
+      activities already committed -> pass 2 after pass 1
+    fk_taskactv_task (TASKACTV) - resource assignments need activities
+      already committed -> separate pass 3
 
 Sheet layout:
   Row 1: field names
@@ -709,6 +720,7 @@ def main():
     out_dir    = os.path.dirname(os.path.abspath(template_path))
     pass1_path = os.path.join(out_dir, "P6_Import_pass1.xml")
     pass2_path = os.path.join(out_dir, "P6_Import_pass2.xml")
+    pass3_path = os.path.join(out_dir, "P6_Import_pass3.xml")
 
     print(f"Reading template: {template_path}")
     wb = openpyxl.load_workbook(template_path, data_only=True)
@@ -813,7 +825,7 @@ def main():
 
     # ── Pass 1: Create New Project ────────────────────────────────────────────
     # Global refs + Resource + ActivityCodeType + ActivityCode
-    # Project: scalars + WBS + Activity + ResourceAssignment  (NO Relationship)
+    # Project: scalars + WBS + Activity  (NO Relationships, NO ResourceAssignments)
     root1 = make_ref_root()
     for r in res_rows:
         res_el = build_resource_element(r)
@@ -831,33 +843,51 @@ def main():
     proj1 = copy.deepcopy(proj_full)
     for rel in proj1.findall(f"{{{NS_BO}}}Relationship"):
         proj1.remove(rel)
+    for ra in proj1.findall(f"{{{NS_BO}}}ResourceAssignment"):
+        proj1.remove(ra)
     root1.append(proj1)
 
-    # ── Pass 2: Update Existing Project ───────────────────────────────────────
+    # ── Pass 2: Update Existing Project — Relationships ───────────────────────
     # Global refs only
-    # Project: scalars + Activity (same ObjectIds) + Relationship  (NO WBS)
+    # Project: scalars + Activity (same ObjectIds) + Relationship
+    # (NO WBS, NO ResourceAssignments — activities now committed after pass 1)
     root2 = make_ref_root()
-
     proj2 = copy.deepcopy(proj_full)
     for wbs in proj2.findall(f"{{{NS_BO}}}WBS"):
         proj2.remove(wbs)
-    # Also strip ResourceAssignment from pass 2 — already committed via pass 1
     for ra in proj2.findall(f"{{{NS_BO}}}ResourceAssignment"):
         proj2.remove(ra)
     root2.append(proj2)
 
-    # ── Write both files ──────────────────────────────────────────────────────
+    # ── Pass 3: Update Existing Project — ResourceAssignments ────────────────
+    # Global refs only
+    # Project: scalars + Activity (same ObjectIds) + ResourceAssignment
+    # (NO WBS, NO Relationships — fk_taskactv_task needs committed activities)
+    root3 = make_ref_root()
+    proj3 = copy.deepcopy(proj_full)
+    for wbs in proj3.findall(f"{{{NS_BO}}}WBS"):
+        proj3.remove(wbs)
+    for rel in proj3.findall(f"{{{NS_BO}}}Relationship"):
+        proj3.remove(rel)
+    root3.append(proj3)
+
+    # ── Write all three files ─────────────────────────────────────────────────
     print()
     print("Pass 1 - Create New Project:")
     write_p6_xml(root1, pass1_path)
     print()
-    print("Pass 2 - Update Existing Project:")
+    print("Pass 2 - Update Existing Project (Relationships):")
     write_p6_xml(root2, pass2_path)
+    print()
+    print("Pass 3 - Update Existing Project (ResourceAssignments):")
+    write_p6_xml(root3, pass3_path)
     print()
     print("Import instructions:")
     print(f"  Step 1: Import {pass1_path}")
     print( "          P6 action: File -> Import -> Primavera P6 XML -> Create New Project")
     print(f"  Step 2: Import {pass2_path}")
+    print( "          P6 action: File -> Import -> Primavera P6 XML -> Update Existing Project")
+    print(f"  Step 3: Import {pass3_path}")
     print( "          P6 action: File -> Import -> Primavera P6 XML -> Update Existing Project")
 
 
