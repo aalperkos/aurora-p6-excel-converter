@@ -1,0 +1,7 @@
+P6_Import_pass1.xml
+P6_Import_pass2.xml
+P6_Import_test.xml
+fill_template.py
+test_*.xml
+*.pyc
+__pycache__/
