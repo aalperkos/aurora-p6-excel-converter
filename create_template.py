@@ -82,6 +82,17 @@ def fv(el, tag):
         return None
     return ch.text
 
+# ── Build UDFType lookup: ObjectId -> Title (for UDFValue sample rows) ────────
+udf_oid_to_title = {}
+udf_oid_to_datatype = {}
+for u in root.findall(f"{{{NS}}}UDFType"):
+    oid   = fv(u, "ObjectId")
+    title = fv(u, "Title")
+    dtype = fv(u, "DataType")
+    if oid and title:
+        udf_oid_to_title[oid]    = title
+        udf_oid_to_datatype[oid] = dtype or ""
+
 # ── PROJECT sheet ─────────────────────────────────────────────────────────────
 proj_headers = [
     "ObjectId","Id","Name","Status","OBSObjectId","ParentEPSObjectId",
@@ -120,7 +131,7 @@ proj_data = [[
     fv(proj,"WBSCodeSeparator"), fv(proj,"SummarizeToWBSLevel"), fv(proj,"SummaryLevel")
 ]]
 
-# ── WBS sheet (all 16 from p6_reference.xml) ──────────────────────────────────────────
+# ── WBS sheet ─────────────────────────────────────────────────────────────────
 wbs_headers = [
     "ObjectId","Code","Name","ProjectObjectId","ParentObjectId",
     "OBSObjectId","Status","SequenceNumber","OriginalBudget",
@@ -139,7 +150,6 @@ wbs_types = [
 ]
 wbs_rows = []
 for w in proj.findall(f"{{{NS}}}WBS"):
-    # Extract first UDF child
     udf_el = w.find(f"{{{NS}}}UDF")
     udf_type = fv(udf_el, "TypeObjectId") if udf_el is not None else None
     udf_ind  = fv(udf_el, "IndicatorValue") if udf_el is not None else None
@@ -155,7 +165,7 @@ for w in proj.findall(f"{{{NS}}}WBS"):
         udf_type, udf_ind
     ])
 
-# ── ACTIVITY sheet (5 samples from p6_reference.xml) ───────────────────────────────────
+# ── ACTIVITY sheet (5 samples) ────────────────────────────────────────────────
 act_headers = [
     "ObjectId","Id","Name","ProjectObjectId","WBSObjectId",
     "Type","Status","CalendarObjectId",
@@ -245,7 +255,7 @@ for a in acts:
         gc(3,"TypeObjectId"), gc(3,"ValueObjectId"),
     ])
 
-# ── RELATIONSHIP sheet (only rels where both activities are in our 5-act sample) ──
+# ── RELATIONSHIP sheet ────────────────────────────────────────────────────────
 rel_headers = [
     "ObjectId",
     "PredecessorActivityObjectId","PredecessorActivityId","PredecessorProjectObjectId",
@@ -259,7 +269,6 @@ rel_types = [
     "Enum","Duration",
 ]
 
-# Build lookup: ActivityObjectId → ActivityId for the 5 sample activities
 sample_acts = proj.findall(f"{{{NS}}}Activity")[:5]
 sample_act_oids = set(fv(a,"ObjectId") for a in sample_acts)
 oid_to_id = {fv(a,"ObjectId"): fv(a,"Id") for a in sample_acts}
@@ -276,7 +285,33 @@ for r in proj.findall(f"{{{NS}}}Relationship"):
             fv(r,"Type"), fv(r,"Lag"),
         ])
 
-# ── UDFTYPE sheet (all 9 from p6_reference.xml) ───────────────────────────────────
+# ── RESOURCEASSIGNMENT sheet ──────────────────────────────────────────────────
+ra_headers = [
+    "ProjectId","ActivityId","ResourceId","RateType",
+    "PlannedUnits","PlannedCost","ActualUnits","ActualCost",
+    "RemainingUnits","RemainingCost","IsPrimaryResource",
+    "ObjectId","ActivityObjectId","ResourceObjectId","ProjectObjectId",
+]
+ra_types = [
+    "Lookup","Lookup","Lookup","Enum",
+    "Unit","Cost","Unit","Cost",
+    "Unit","Cost","Boolean",
+    "ObjectId","ObjectId","ObjectId","ObjectId",
+]
+ra_sample_rows = []
+for ra in proj.findall(f"{{{NS}}}ResourceAssignment")[:3]:
+    ra_sample_rows.append([
+        fv(ra,"ProjectId"),      fv(ra,"ActivityId"),   fv(ra,"ResourceId"),
+        fv(ra,"RateType"),
+        fv(ra,"PlannedUnits"),   fv(ra,"PlannedCost"),
+        fv(ra,"ActualUnits"),    fv(ra,"ActualCost"),
+        fv(ra,"RemainingUnits"), fv(ra,"RemainingCost"),
+        fv(ra,"IsPrimaryResource"),
+        fv(ra,"ObjectId"),       fv(ra,"ActivityObjectId"),
+        fv(ra,"ResourceObjectId"), fv(ra,"ProjectObjectId"),
+    ])
+
+# ── UDFTYPE sheet ─────────────────────────────────────────────────────────────
 udftype_headers = ["ObjectId","DataType","SubjectArea","Title","IsSecureCode"]
 udftype_types   = ["ObjectId","Enum","Enum","String","Boolean"]
 udftype_rows = []
@@ -286,7 +321,36 @@ for u in root.findall(f"{{{NS}}}UDFType"):
         fv(u,"Title"), fv(u,"IsSecureCode")
     ])
 
-# ── ACTIVITYCODETYPE sheet (all 4 from p6_reference.xml) ───────────────────────────
+# ── UDFVALUE sheet ────────────────────────────────────────────────────────────
+udfv_headers = [
+    "ProjectId","ObjectType","ObjectId_Ref","UDFTypeTitle",
+    "TextValue","NumberValue","DateValue","IndicatorValue",
+]
+udfv_types = [
+    "Lookup","Enum","Lookup","Lookup",
+    "String","Cost","Date","Enum",
+]
+udfv_rows = []
+proj_id_ref = fv(proj, "Id")
+
+# Sample from Activity UDFs only (up to 3 activities, first UDF each).
+# WBS UDFs are already covered by the UDF_TypeObjectId / UDF_IndicatorValue
+# columns in the WBS sheet — putting them here too would create duplicates.
+for a in proj.findall(f"{{{NS}}}Activity")[:3]:
+    udf_el = a.find(f"{{{NS}}}UDF")
+    if udf_el is not None:
+        type_oid = fv(udf_el, "TypeObjectId")
+        title = udf_oid_to_title.get(type_oid, "") if type_oid else ""
+        if title:
+            udfv_rows.append([
+                proj_id_ref, "Activity", fv(a, "Id"), title,
+                fv(udf_el, "TextValue"),
+                fv(udf_el, "NumberValue"),
+                fv(udf_el, "DateValue"),
+                fv(udf_el, "IndicatorValue"),
+            ])
+
+# ── ACTIVITYCODETYPE sheet ────────────────────────────────────────────────────
 actype_headers = [
     "ObjectId","Name","Scope","Length","IsSecureCode","SequenceNumber","RefProjectObjectIds"
 ]
@@ -301,7 +365,7 @@ for act in root.findall(f"{{{NS}}}ActivityCodeType"):
         fv(act,"RefProjectObjectIds")
     ])
 
-# ── ACTIVITYCODE sheet (all 16 from p6_reference.xml) ──────────────────────────────
+# ── ACTIVITYCODE sheet ────────────────────────────────────────────────────────
 ac_headers = [
     "ObjectId","CodeTypeObjectId","CodeValue","Description","Color","SequenceNumber"
 ]
@@ -315,7 +379,7 @@ for ac in root.findall(f"{{{NS}}}ActivityCode"):
         fv(ac,"Description"), fv(ac,"Color"), fv(ac,"SequenceNumber")
     ])
 
-# ── RESOURCE sheet (all 30 from p6_reference.xml) ─────────────────────────────────
+# ── RESOURCE sheet ────────────────────────────────────────────────────────────
 res_headers = [
     "ObjectId","Id","Name","Code","ResourceType","CalendarObjectId",
     "CurrencyObjectId","DefaultUnitsPerTime","OvertimeFactor",
@@ -342,7 +406,7 @@ for r in root.findall(f"{{{NS}}}Resource"):
         fv(r,"ResourceNotes"), fv(r,"UnitOfMeasureObjectId")
     ])
 
-# ── EXPENSE sheet (empty, ActivityExpense not in p6_reference.xml) ─────────────────
+# ── EXPENSE sheet (empty placeholder) ────────────────────────────────────────
 exp_headers = [
     "ObjectId","ActivityObjectId","ProjectObjectId","Description",
     "CostAccountObjectId","PlannedCost","ActualCost","RemainingCost",
@@ -354,7 +418,7 @@ exp_types = [
     "Cost","Boolean","Enum","String"
 ]
 
-# ── _CONFIG sheet (user-editable P6 object IDs) ───────────────────────────
+# ── _CONFIG sheet ─────────────────────────────────────────────────────────────
 cfg_headers = ["Field", "Value", "Description"]
 cfg_types   = ["String", "ObjectId", "String"]
 cfg_rows = [
@@ -366,30 +430,34 @@ cfg_rows = [
      "ObjectId of the Currency (default: 1 = USD Dollar)"],
 ]
 
-# ── Write workbook ─────────────────────────────────────────────────────────
+# ── Write workbook ─────────────────────────────────────────────────────────────
 wb = openpyxl.Workbook()
 wb.remove(wb.active)  # remove default sheet
 
-write_sheet(wb, "_Config",          cfg_headers,      cfg_types,      cfg_rows)
-write_sheet(wb, "Project",          proj_headers,     proj_types,     proj_data)
-write_sheet(wb, "WBS",              wbs_headers,      wbs_types,      wbs_rows)
-write_sheet(wb, "Activity",         act_headers,      act_types,      act_rows)
-write_sheet(wb, "Relationship",     rel_headers,      rel_types,      rel_rows)
-write_sheet(wb, "UDFType",          udftype_headers,  udftype_types,  udftype_rows)
-write_sheet(wb, "ActivityCodeType", actype_headers,   actype_types,   actype_rows)
-write_sheet(wb, "ActivityCode",     ac_headers,       ac_types,       ac_rows)
-write_sheet(wb, "Expense",          exp_headers,      exp_types,      [])
-write_sheet(wb, "Resource",         res_headers,      res_types,      res_rows)
+write_sheet(wb, "_Config",            cfg_headers,      cfg_types,      cfg_rows)
+write_sheet(wb, "Project",            proj_headers,     proj_types,     proj_data)
+write_sheet(wb, "WBS",                wbs_headers,      wbs_types,      wbs_rows)
+write_sheet(wb, "Activity",           act_headers,      act_types,      act_rows)
+write_sheet(wb, "Relationship",       rel_headers,      rel_types,      rel_rows)
+write_sheet(wb, "ResourceAssignment", ra_headers,       ra_types,       ra_sample_rows)
+write_sheet(wb, "UDFType",            udftype_headers,  udftype_types,  udftype_rows)
+write_sheet(wb, "UDFValue",           udfv_headers,     udfv_types,     udfv_rows)
+write_sheet(wb, "ActivityCodeType",   actype_headers,   actype_types,   actype_rows)
+write_sheet(wb, "ActivityCode",       ac_headers,       ac_types,       ac_rows)
+write_sheet(wb, "Expense",            exp_headers,      exp_types,      [])
+write_sheet(wb, "Resource",           res_headers,      res_types,      res_rows)
 
 out = "P6_Import_Template.xlsx"
 wb.save(out)
 print(f"Saved {out}")
-print(f"  _Config rows       : {len(cfg_rows)}")
-print(f"  Project rows       : {len(proj_data)}")
-print(f"  WBS rows           : {len(wbs_rows)}")
-print(f"  Activity rows      : {len(act_rows)}  (5 samples from p6_reference.xml)")
-print(f"  Relationship       : {len(rel_rows)}")
-print(f"  UDFType            : {len(udftype_rows)}")
-print(f"  ActivityCodeType   : {len(actype_rows)}")
-print(f"  ActivityCode       : {len(ac_rows)}")
-print(f"  Resource rows      : {len(res_rows)}")
+print(f"  _Config rows         : {len(cfg_rows)}")
+print(f"  Project rows         : {len(proj_data)}")
+print(f"  WBS rows             : {len(wbs_rows)}")
+print(f"  Activity rows        : {len(act_rows)}  (5 samples from p6_reference.xml)")
+print(f"  Relationship         : {len(rel_rows)}")
+print(f"  ResourceAssignment   : {len(ra_sample_rows)}")
+print(f"  UDFType              : {len(udftype_rows)}")
+print(f"  UDFValue             : {len(udfv_rows)}")
+print(f"  ActivityCodeType     : {len(actype_rows)}")
+print(f"  ActivityCode         : {len(ac_rows)}")
+print(f"  Resource rows        : {len(res_rows)}")
