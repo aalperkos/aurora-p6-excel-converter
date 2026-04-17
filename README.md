@@ -9,13 +9,15 @@ the converter, and get two ready-to-import XML files.
 
 ## What This Tool Does
 
-The converter reads `P6_Import_Template.xlsx` and produces two Primavera P6
+The converter reads `P6_Import_Template.xlsx` and produces three Primavera P6
 XML files that together import a complete project schedule — including WBS
-structure, activities, and relationships — into P6 Professional 18.8. Because
-P6 18.8 cannot resolve relationship foreign-key constraints within a new-project
-import transaction (activities are not yet committed to the database when
-relationships are processed), the output is split into two files that must be
-imported in sequence.
+structure, activities, relationships, and resource assignments — into
+P6 Professional 18.8. Because P6 18.8 cannot resolve foreign-key constraints
+within a new-project import transaction, the output is split into three files
+that must be imported in sequence:
+
+- **`fk_taskpred_task`** (TASKPRED) — relationships require activities already committed
+- **`fk_taskactv_task`** (TASKACTV) — resource assignments require activities already committed
 
 ---
 
@@ -89,18 +91,20 @@ Row 1 = column names, Row 2 = data types (do not edit), Row 3+ = your data.
 py aurora_p6_converter.py P6_Import_Template.xlsx
 ```
 
-Produces two files in the same folder as the template:
+Produces three files in the same folder as the template:
 
 | File | Import as |
 |---|---|
 | `P6_Import_pass1.xml` | **Create New Project** |
 | `P6_Import_pass2.xml` | **Update Existing Project** |
+| `P6_Import_pass3.xml` | **Update Existing Project** |
 
 ---
 
 ## Import Instructions (P6 Professional 18.8)
 
-> **Important:** Both passes must be imported in order. Do not skip pass 1.
+> **Important:** All three passes must be imported in order. Do not skip Pass 1.
+> Pass 3 is only required if your template has ResourceAssignment rows.
 
 ### Pass 1 — Create the project
 
@@ -109,7 +113,7 @@ Produces two files in the same folder as the template:
 3. Import action: **Create New Project**
 4. Complete the import wizard
 
-*Imports: Project, WBS, Activities, Resources, ActivityCodes. No relationships.*
+*Imports: Project, WBS, Activities, Resources, ActivityCodes. No relationships or resource assignments.*
 
 ### Pass 2 — Add relationships
 
@@ -118,8 +122,18 @@ Produces two files in the same folder as the template:
 3. Import action: **Update Existing Project**
 4. Complete the import wizard
 
-*Imports: Activities (matched by ObjectId, updated in place) + Relationships.*
-*P6 can now resolve all FK constraints because activities are already committed.*
+*Imports: Activities (matched by ObjectId) + Relationships.*
+*Activities are now committed — `fk_taskpred_task` constraints resolve correctly.*
+
+### Pass 3 — Add resource assignments
+
+1. In P6: **File → Import → Primavera P6 XML**
+2. Select `P6_Import_pass3.xml`
+3. Import action: **Update Existing Project**
+4. Complete the import wizard
+
+*Imports: Activities (matched by ObjectId) + ResourceAssignments.*
+*Activities are now committed — `fk_taskactv_task` constraints resolve correctly.*
 
 ---
 
@@ -128,9 +142,10 @@ Produces two files in the same folder as the template:
 This tool uses P6's standard XML import interface. Compared to a direct P6 API
 integration, the following limitations apply:
 
-- **Two-pass import required.** P6 18.8 has a transaction-level bug: relationship
-  FK constraints fail when activities and relationships are imported in the same
-  transaction. Two separate imports are the workaround.
+- **Three-pass import required.** P6 18.8 has transaction-level FK constraint
+  failures for both relationships (`fk_taskpred_task`) and resource assignments
+  (`fk_taskactv_task`) when imported in the same transaction as new activities.
+  Three separate imports are the workaround.
 - **No real-time sync.** Batch-only workflow — there is no live connection between
   the spreadsheet and the P6 database.
 - **ObjectIds are generated, not stable.** P6 assigns its own database IDs on

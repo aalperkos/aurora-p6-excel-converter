@@ -185,7 +185,7 @@ class App(tk.Tk):
             "  2. Select  P6_Import_pass1.xml\n"
             "  3. Import action: Create New Project\n"
             "  4. Complete the import wizard\n"
-            "  Imports: Project, WBS, Activities, Resources, ActivityCodes. No relationships.\n"
+            "  Imports: Project, WBS, Activities, Resources, ActivityCodes.\n"
             "\n"
             "Pass 2 \u2014 Add Relationships\n"
             "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
@@ -194,10 +194,18 @@ class App(tk.Tk):
             "  4. Complete the import wizard\n"
             "  Imports: Activities (matched by ObjectId) + Relationships.\n"
             "\n"
-            "Important: Both passes must be imported in order. Do not skip Pass 1."
+            "Pass 3 \u2014 Add Resource Assignments\n"
+            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
+            "  2. Select  P6_Import_pass3.xml\n"
+            "  3. Import action: Update Existing Project\n"
+            "  4. Complete the import wizard\n"
+            "  Imports: Activities (matched by ObjectId) + ResourceAssignments.\n"
+            "\n"
+            "Important: All three passes must be imported in order. Do not skip Pass 1.\n"
+            "Pass 3 is only required if your template has ResourceAssignment rows."
         )
         txt = tk.Text(s3, font=FONT_INSTR, bg="#EBF2FA", fg="#1A1A2E",
-                      relief="flat", bd=0, height=14, wrap="word",
+                      relief="flat", bd=0, height=19, wrap="word",
                       state="normal", cursor="arrow")
         txt.insert("1.0", instr)
         txt.configure(state="disabled")
@@ -418,9 +426,10 @@ class App(tk.Tk):
                 self._log_line("Conversion complete.", "ok")
                 messagebox.showinfo(
                     "Conversion Complete",
-                    f"Two XML files created in:\n{tmpl_dir}\n\n"
-                    "  P6_Import_pass1.xml  \u2014  Import as Create New Project\n"
-                    "  P6_Import_pass2.xml  \u2014  Import as Update Existing Project\n\n"
+                    f"Three XML files created in:\n{tmpl_dir}\n\n"
+                    "  P6_Import_pass1.xml  \u2014  Create New Project\n"
+                    "  P6_Import_pass2.xml  \u2014  Update Existing Project (Relationships)\n"
+                    "  P6_Import_pass3.xml  \u2014  Update Existing Project (ResourceAssignments)\n\n"
                     "See Step 3 for import instructions."
                 )
             else:
