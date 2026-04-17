@@ -1,6 +1,13 @@
+# Generated import files
 P6_Import_pass1.xml
 P6_Import_pass2.xml
 P6_Import_test.xml
+
+# User-supplied reference files (contain real P6 database data - never commit)
+p6_reference.xml
+EC00630.xml
+
+# Development / test files
 fill_template.py
 test_*.xml
 *.pyc

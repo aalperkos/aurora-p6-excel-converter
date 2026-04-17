@@ -21,6 +21,13 @@ Sheet layout:
   Row 2: field types (Date/String/Enum/Cost/Unit/Duration/Boolean/Lookup/ObjectId)
   Row 3+: data rows
 
+Requires p6_reference.xml:
+  Before running, export ANY project from your P6 as XML
+  (File -> Export -> Primavera P6 XML), rename it to p6_reference.xml
+  and place it in the same folder as this script.
+  The converter reads Calendar, OBS, Currency, UDFType, Role, and RoleRate
+  from that file - elements P6 requires in every import XML.
+
 Usage:
   py aurora_p6_converter.py [template.xlsx]
   Output files P6_Import_pass1.xml and P6_Import_pass2.xml are written
@@ -40,9 +47,9 @@ import openpyxl
 NS_BO  = "http://xmlns.oracle.com/Primavera/P6Professional/V18.8/API/BusinessObjects"
 NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
 
-# ── Hardcoded defaults derived from EC00630.xml ──────────────────────────────
-DEFAULT_CALENDAR_OID = "939"   # only CalendarObjectId used in EC00630 activities
-DEFAULT_OBS_OID      = "745"   # OBSObjectId on Project and all WBS nodes
+# ── Default P6 ObjectId fallbacks (overridden by _Config sheet) ──────────────
+DEFAULT_CALENDAR_OID = ""   # set in _Config: CalendarObjectId
+DEFAULT_OBS_OID      = ""   # set in _Config: OBSObjectId
 DEFAULT_ROOT_WBS_OID = "17583" # Project-level root WBS (not in WBS element list — do NOT use as Activity fallback)
 SCHEMA_LOC = (
     "http://xmlns.oracle.com/Primavera/P6Professional/V18.8/API/BusinessObjects "
@@ -131,23 +138,36 @@ def load_reference_elements(ref_path, *tag_names):
     Load named top-level elements verbatim from a P6 reference XML file.
     Returns {tag_name: [list of ET.Element copies]}.
     Elements are deep-copied with their original namespace tags preserved.
+
+    Aborts with a clear error if the file is missing - P6 CleanupActivities
+    crashes with NullReferenceException when Calendar/OBS/Currency/Role/RoleRate
+    are absent, so there is no point continuing without it.
     """
-    result = {t: [] for t in tag_names}
     if not os.path.exists(ref_path):
-        print(f"  [WARN] Reference XML not found: {ref_path}  "
-              f"(Calendar/OBS/Currency/Role/RoleRate will be omitted)")
-        return result
+        print()
+        print("ERROR: p6_reference.xml not found.")
+        print()
+        print("  Before running the converter, export any project from your P6:")
+        print("    File -> Export -> Primavera P6 XML")
+        print(f"  Rename the exported file to:  p6_reference.xml")
+        print(f"  Place it in the same folder:  {os.path.dirname(ref_path)}")
+        print()
+        print("  The converter reads Calendar, OBS, Currency, UDFType, Role, and")
+        print("  RoleRate from that file. P6 requires these in every import XML.")
+        sys.exit(1)
     try:
         ref_tree = ET.parse(ref_path)
         ref_root = ref_tree.getroot()
+        result = {t: [] for t in tag_names}
         for tname in tag_names:
             result[tname] = [copy.deepcopy(el)
                              for el in ref_root.findall(f"{{{NS_BO}}}{tname}")]
         counts = {t: len(v) for t, v in result.items()}
         print(f"  Loaded from {os.path.basename(ref_path)}: {counts}")
+        return result
     except Exception as e:
-        print(f"  [WARN] Could not parse reference XML {ref_path}: {e}")
-    return result
+        print(f"ERROR: Could not parse {ref_path}: {e}")
+        sys.exit(1)
 
 
 def read_sheet(wb, name):
@@ -630,10 +650,10 @@ def main():
     if cfg.get("OBSObjectId"):
         DEFAULT_OBS_OID = cfg["OBSObjectId"]
 
-    # Load required global reference elements from EC00630.xml.
+    # Load required global reference elements from p6_reference.xml.
     # Calendar/OBS/Currency/Role/RoleRate must be present in EVERY import XML
     # or P6 CleanupActivities crashes with a NullReferenceException.
-    ref_xml = os.path.join(os.path.dirname(os.path.abspath(template_path)), "EC00630.xml")
+    ref_xml = os.path.join(os.path.dirname(os.path.abspath(template_path)), "p6_reference.xml")
     ref_els = load_reference_elements(
         ref_xml, "Currency", "UDFType", "OBS", "Calendar", "Role", "RoleRate"
     )

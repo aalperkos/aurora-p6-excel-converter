@@ -1,17 +1,22 @@
 """
 create_template.py
-Creates P6_Import_Template.xlsx with sample data from EC00630.xml (5 activities).
+Creates a blank P6_Import_Template.xlsx.
+Requires p6_reference.xml in the same folder (your own P6 XML export).
 
   Row 1 = field names
   Row 2 = field types
-  Row 3+ = sample data
+  Row 3+ = your project data
 
 _Config sheet holds user-configurable P6 object IDs (CalendarObjectId,
-OBSObjectId, CurrencyObjectId).
+OBSObjectId, CurrencyObjectId) - fill these from your P6 environment.
 
 Workflow:
-  1. Fill P6_Import_Template.xlsx with project data (or use fill_template.py)
-  2. Run: py aurora_p6_converter.py P6_Import_Template.xlsx
+  1. Export any project from P6: File -> Export -> Primavera P6 XML
+     Rename the file to p6_reference.xml, place alongside this script.
+  2. Run: py create_template.py
+     Produces P6_Import_Template.xlsx with sample rows from p6_reference.xml.
+  3. Fill P6_Import_Template.xlsx with your project data.
+  4. Run: py aurora_p6_converter.py P6_Import_Template.xlsx
      Produces:
        P6_Import_pass1.xml  -- import first  (Create New Project)
        P6_Import_pass2.xml  -- import second (Update Existing Project)
@@ -57,8 +62,14 @@ def write_sheet(wb, name, headers, types, rows):
     auto_width(ws)
     return ws
 
-# ── Load EC00630.xml ──────────────────────────────────────────────────────────
-tree = ET.parse("EC00630.xml")
+# ── Load p6_reference.xml ────────────────────────────────────────────────────
+import os, sys
+if not os.path.exists("p6_reference.xml"):
+    print("ERROR: p6_reference.xml not found.")
+    print("  Export any project from P6: File -> Export -> Primavera P6 XML")
+    print("  Rename it to p6_reference.xml and place it in this folder.")
+    sys.exit(1)
+tree = ET.parse("p6_reference.xml")
 root = tree.getroot()
 proj = root.find(f"{{{NS}}}Project")
 
@@ -109,7 +120,7 @@ proj_data = [[
     fv(proj,"WBSCodeSeparator"), fv(proj,"SummarizeToWBSLevel"), fv(proj,"SummaryLevel")
 ]]
 
-# ── WBS sheet (all 16 from EC00630) ──────────────────────────────────────────
+# ── WBS sheet (all 16 from p6_reference.xml) ──────────────────────────────────────────
 wbs_headers = [
     "ObjectId","Code","Name","ProjectObjectId","ParentObjectId",
     "OBSObjectId","Status","SequenceNumber","OriginalBudget",
@@ -144,7 +155,7 @@ for w in proj.findall(f"{{{NS}}}WBS"):
         udf_type, udf_ind
     ])
 
-# ── ACTIVITY sheet (5 samples from EC00630) ───────────────────────────────────
+# ── ACTIVITY sheet (5 samples from p6_reference.xml) ───────────────────────────────────
 act_headers = [
     "ObjectId","Id","Name","ProjectObjectId","WBSObjectId",
     "Type","Status","CalendarObjectId",
@@ -265,7 +276,7 @@ for r in proj.findall(f"{{{NS}}}Relationship"):
             fv(r,"Type"), fv(r,"Lag"),
         ])
 
-# ── UDFTYPE sheet (all 9 from EC00630) ───────────────────────────────────
+# ── UDFTYPE sheet (all 9 from p6_reference.xml) ───────────────────────────────────
 udftype_headers = ["ObjectId","DataType","SubjectArea","Title","IsSecureCode"]
 udftype_types   = ["ObjectId","Enum","Enum","String","Boolean"]
 udftype_rows = []
@@ -275,7 +286,7 @@ for u in root.findall(f"{{{NS}}}UDFType"):
         fv(u,"Title"), fv(u,"IsSecureCode")
     ])
 
-# ── ACTIVITYCODETYPE sheet (all 4 from EC00630) ───────────────────────────
+# ── ACTIVITYCODETYPE sheet (all 4 from p6_reference.xml) ───────────────────────────
 actype_headers = [
     "ObjectId","Name","Scope","Length","IsSecureCode","SequenceNumber","RefProjectObjectIds"
 ]
@@ -290,7 +301,7 @@ for act in root.findall(f"{{{NS}}}ActivityCodeType"):
         fv(act,"RefProjectObjectIds")
     ])
 
-# ── ACTIVITYCODE sheet (all 16 from EC00630) ──────────────────────────────
+# ── ACTIVITYCODE sheet (all 16 from p6_reference.xml) ──────────────────────────────
 ac_headers = [
     "ObjectId","CodeTypeObjectId","CodeValue","Description","Color","SequenceNumber"
 ]
@@ -304,7 +315,7 @@ for ac in root.findall(f"{{{NS}}}ActivityCode"):
         fv(ac,"Description"), fv(ac,"Color"), fv(ac,"SequenceNumber")
     ])
 
-# ── RESOURCE sheet (all 30 from EC00630) ─────────────────────────────────
+# ── RESOURCE sheet (all 30 from p6_reference.xml) ─────────────────────────────────
 res_headers = [
     "ObjectId","Id","Name","Code","ResourceType","CalendarObjectId",
     "CurrencyObjectId","DefaultUnitsPerTime","OvertimeFactor",
@@ -331,7 +342,7 @@ for r in root.findall(f"{{{NS}}}Resource"):
         fv(r,"ResourceNotes"), fv(r,"UnitOfMeasureObjectId")
     ])
 
-# ── EXPENSE sheet (empty, ActivityExpense not in EC00630) ─────────────────
+# ── EXPENSE sheet (empty, ActivityExpense not in p6_reference.xml) ─────────────────
 exp_headers = [
     "ObjectId","ActivityObjectId","ProjectObjectId","Description",
     "CostAccountObjectId","PlannedCost","ActualCost","RemainingCost",
@@ -376,7 +387,7 @@ print(f"Saved {out}")
 print(f"  _Config rows       : {len(cfg_rows)}")
 print(f"  Project rows       : {len(proj_data)}")
 print(f"  WBS rows           : {len(wbs_rows)}")
-print(f"  Activity rows      : {len(act_rows)}  (5 samples from EC00630)")
+print(f"  Activity rows      : {len(act_rows)}  (5 samples from p6_reference.xml)")
 print(f"  Relationship       : {len(rel_rows)}")
 print(f"  UDFType            : {len(udftype_rows)}")
 print(f"  ActivityCodeType   : {len(actype_rows)}")

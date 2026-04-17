@@ -23,10 +23,26 @@ imported in sequence.
 
 - **Python 3.9+**
 - **openpyxl** — `pip install openpyxl`
-- **EC00630.xml** — reference P6 export file that must be placed in the same
-  directory as the converter. It provides the Calendar, OBS, Currency, Role, and
-  RoleRate elements that P6 CleanupActivities requires in every import XML.
-  Without it the import crashes with a NullReferenceException.
+- **p6_reference.xml** — a P6 XML export from your own environment (see setup below)
+
+---
+
+## Setup: Get Your p6_reference.xml
+
+Before running the converter, export any existing project from **your** P6:
+
+1. Open P6 Professional
+2. **File → Export → Primavera P6 XML**
+3. Select any project and export
+4. Rename the exported file to **`p6_reference.xml`**
+5. Place it in the same folder as `aurora_p6_converter.py`
+
+The converter reads Calendar, OBS, Currency, UDFType, Role, and RoleRate
+elements from this file. P6 requires these in every import XML or the import
+crashes during CleanupActivities. Because these elements contain ObjectIds
+specific to each P6 database, every user must supply their own reference file.
+
+> `p6_reference.xml` is listed in `.gitignore` — it is not committed to the repository.
 
 ---
 
@@ -35,44 +51,50 @@ imported in sequence.
 | File | Purpose |
 |---|---|
 | `aurora_p6_converter.py` | Main converter — reads template, writes pass1 + pass2 XML |
-| `create_template.py` | Generates a blank `P6_Import_Template.xlsx` with sample EC00630 data |
+| `create_template.py` | Generates `P6_Import_Template.xlsx` with sample rows from your p6_reference.xml |
 | `P6_Import_Template.xlsx` | Fill this with your project data |
-| `EC00630.xml` | Reference P6 export (required at runtime, not included in repo) |
 
 ---
 
 ## How to Use
 
-### Step 1 — Fill the template
+### Step 1 — Generate a blank template (first time only)
 
-Open `P6_Import_Template.xlsx` and populate the following sheets:
-
-| Sheet | What to fill |
-|---|---|
-| `_Config` | CalendarObjectId, OBSObjectId, CurrencyObjectId from your P6 environment |
-| `Project` | One row: project Id, Name, dates, EPS parent, WBS root |
-| `WBS` | One row per WBS node |
-| `Activity` | One row per activity (Type, dates, status, percent complete) |
-| `Relationship` | One row per dependency (predecessor, successor, type, lag) |
-| `Resource` | Optional — one row per resource |
-| `ActivityCodeType` / `ActivityCode` | Optional — activity code definitions |
-
-Row 1 = column names, Row 2 = data types (do not edit), Row 3+ = your data.
-
-To regenerate a blank template with sample data from EC00630.xml:
 ```
 py create_template.py
 ```
 
-### Step 2 — Run the converter
+This reads `p6_reference.xml` and writes `P6_Import_Template.xlsx` pre-filled
+with sample rows from that reference project.
+
+### Step 2 — Fill the template
+
+Open `P6_Import_Template.xlsx` and populate the following sheets with your data:
+
+| Sheet | What to fill |
+|---|---|
+| `_Config` | **CalendarObjectId**, **OBSObjectId**, **CurrencyObjectId** from your P6 environment |
+| `Project` | One row: project Id, Name, dates, EPS parent, WBS root |
+| `WBS` | One row per WBS node |
+| `Activity` | One row per activity (Type, dates, status, percent complete) |
+| `Relationship` | One row per dependency (predecessor, successor, type, lag) |
+| `Resource` | Optional — resource definitions |
+| `ActivityCodeType` / `ActivityCode` | Optional — activity code definitions |
+
+Row 1 = column names, Row 2 = data types (do not edit), Row 3+ = your data.
+
+### Step 3 — Run the converter
 
 ```
 py aurora_p6_converter.py P6_Import_Template.xlsx
 ```
 
-This writes two files to the same directory as the template:
-- `P6_Import_pass1.xml`
-- `P6_Import_pass2.xml`
+Produces two files in the same folder as the template:
+
+| File | Import as |
+|---|---|
+| `P6_Import_pass1.xml` | **Create New Project** |
+| `P6_Import_pass2.xml` | **Update Existing Project** |
 
 ---
 
@@ -82,26 +104,22 @@ This writes two files to the same directory as the template:
 
 ### Pass 1 — Create the project
 
-1. In P6, go to **File → Import**
-2. Select **Primavera P6 XML**
-3. Choose `P6_Import_pass1.xml`
-4. Import action: **Create New Project**
-5. Complete the import wizard
+1. In P6: **File → Import → Primavera P6 XML**
+2. Select `P6_Import_pass1.xml`
+3. Import action: **Create New Project**
+4. Complete the import wizard
 
-*Pass 1 imports: Project, WBS, Activities, Resources, ActivityCodes.*
-*No relationships are included.*
+*Imports: Project, WBS, Activities, Resources, ActivityCodes. No relationships.*
 
 ### Pass 2 — Add relationships
 
-1. In P6, go to **File → Import**
-2. Select **Primavera P6 XML**
-3. Choose `P6_Import_pass2.xml`
-4. Import action: **Update Existing Project**
-5. Complete the import wizard
+1. In P6: **File → Import → Primavera P6 XML**
+2. Select `P6_Import_pass2.xml`
+3. Import action: **Update Existing Project**
+4. Complete the import wizard
 
-*Pass 2 imports: Activities (matched by ObjectId, updated in place) and*
-*Relationships. P6 can now resolve all FK constraints because activities are*
-*already committed to the database from pass 1.*
+*Imports: Activities (matched by ObjectId, updated in place) + Relationships.*
+*P6 can now resolve all FK constraints because activities are already committed.*
 
 ---
 
@@ -110,26 +128,25 @@ This writes two files to the same directory as the template:
 This tool uses P6's standard XML import interface. Compared to a direct P6 API
 integration, the following limitations apply:
 
-- **Two-pass import required.** P6 18.8 has a transaction-level bug where
-  relationship FK constraints fail for new-project imports. The workaround
-  (pass 1 then pass 2) is manual and requires two separate import operations.
-- **No real-time sync.** The workflow is batch-only: export from Excel, import
-  into P6. There is no live connection between the spreadsheet and the P6 database.
+- **Two-pass import required.** P6 18.8 has a transaction-level bug: relationship
+  FK constraints fail when activities and relationships are imported in the same
+  transaction. Two separate imports are the workaround.
+- **No real-time sync.** Batch-only workflow — there is no live connection between
+  the spreadsheet and the P6 database.
 - **ObjectIds are generated, not stable.** P6 assigns its own database IDs on
-  import. Subsequent re-imports may create duplicates rather than updating
-  existing records unless ObjectIds are carefully managed.
-- **WBS Summary activities cannot be relationship endpoints.** P6 does not
-  allow WBS Summary activity types as predecessors or successors. Such
-  relationships are automatically dropped by the converter.
-- **No resource assignments.** The current template supports resource
-  definitions but not ResourceAssignment elements (linking resources to specific
-  activities).
+  import. Subsequent re-imports may create duplicates rather than updating existing
+  records unless ObjectIds are carefully managed.
+- **WBS Summary activities cannot be relationship endpoints.** P6 does not allow
+  WBS Summary activity types as predecessors or successors. The converter
+  automatically drops such relationships.
+- **No resource assignments.** Resource definitions are supported but
+  ResourceAssignment elements (linking resources to specific activities) are not.
 - **Limited field coverage.** Only the fields needed for a standard task-based
-  schedule are supported. Baselines, earned value overrides, financial periods,
-  and other advanced P6 features are not included.
-- **EC00630.xml dependency.** The converter requires a specific reference export
-  file from your P6 environment. A different P6 database will have different
-  Calendar/OBS/Role ObjectIds and will need a new reference export.
+  schedule are included. Baselines, earned value overrides, financial periods,
+  and other advanced P6 features are not supported.
+- **p6_reference.xml is environment-specific.** Calendar/OBS/Role ObjectIds
+  differ between P6 databases. Each user must supply a reference export from
+  their own environment.
 
 ---
 
