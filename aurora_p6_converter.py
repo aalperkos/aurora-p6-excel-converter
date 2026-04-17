@@ -9,7 +9,7 @@ The two-pass workaround:
   Pass 1 - P6_Import_pass1.xml   Import action: Create New Project
     Contains: Calendar/OBS/Currency/Role/RoleRate (required global refs)
               Resource, ActivityCodeType, ActivityCode (top-level)
-              Project -> WBS, Activity  (NO Relationships)
+              Project -> WBS, Activity, ResourceAssignment  (NO Relationships)
 
   Pass 2 - P6_Import_pass2.xml   Import action: Update Existing Project
     Contains: Calendar/OBS/Currency/Role/RoleRate
@@ -50,23 +50,24 @@ NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
 # ── Default P6 ObjectId fallbacks (overridden by _Config sheet) ──────────────
 DEFAULT_CALENDAR_OID = ""   # set in _Config: CalendarObjectId
 DEFAULT_OBS_OID      = ""   # set in _Config: OBSObjectId
-DEFAULT_ROOT_WBS_OID = "17583" # Project-level root WBS (not in WBS element list — do NOT use as Activity fallback)
+DEFAULT_ROOT_WBS_OID = "17583"
 SCHEMA_LOC = (
     "http://xmlns.oracle.com/Primavera/P6Professional/V18.8/API/BusinessObjects "
     "http://xmlns.oracle.com/Primavera/P6Professional/V18.8/API/p6apibo.xsd"
 )
 
-# ── Fields that are always xsi:nil in EC00630 (Activity) ────────────────────
+# ── Fields that are always xsi:nil (Activity) ────────────────────────────────
 ACTIVITY_NIL_ALWAYS = {
     "ExpectedFinishDate",
     "ExternalEarlyStartDate", "ExternalLateFinishDate",
-    "PrimaryConstraintDate", "ResumeDate",
+    "ResumeDate",
     "SecondaryConstraintDate", "SecondaryConstraintType", "SuspendDate",
 }
 # Optionally nil: emit value when present, xsi:nil when blank
 ACTIVITY_NIL_OPTIONAL = {
     "ActualFinishDate", "ActualStartDate",   # nil for Not Started; value for In Progress
-    "PrimaryConstraintType", "PrimaryResourceObjectId", "WBSObjectId",
+    "PrimaryConstraintDate", "PrimaryConstraintType",
+    "PrimaryResourceObjectId", "WBSObjectId",
 }
 
 WBS_NIL_ALWAYS   = {"AnticipatedFinishDate", "AnticipatedStartDate", "WBSCategoryObjectId"}
@@ -90,7 +91,6 @@ def fmt_date(val):
     s = str(val).strip()
     if not s:
         return None
-    # Try common patterns
     for pat in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d",
                 "%d/%m/%Y", "%m/%d/%Y"):
         try:
@@ -109,7 +109,7 @@ def make_tag(parent, tag, text=None, nil=False):
     return el
 
 def nil_or_text(parent, tag, value, nil_always_set, nil_optional_set):
-    """Emit element with correct nil/value handling per EC00630 rules."""
+    """Emit element with correct nil/value handling."""
     if tag in nil_always_set:
         make_tag(parent, tag, nil=True)
     elif tag in nil_optional_set:
@@ -127,7 +127,7 @@ def read_config(wb):
     ws = wb["_Config"]
     rows = list(ws.iter_rows(values_only=True))
     cfg = {}
-    for row in rows[2:]:  # skip header + type rows
+    for row in rows[2:]:
         if row and row[0] is not None and row[1] is not None:
             cfg[str(row[0]).strip()] = str(row[1]).strip()
     return cfg
@@ -137,11 +137,8 @@ def load_reference_elements(ref_path, *tag_names):
     """
     Load named top-level elements verbatim from a P6 reference XML file.
     Returns {tag_name: [list of ET.Element copies]}.
-    Elements are deep-copied with their original namespace tags preserved.
 
-    Aborts with a clear error if the file is missing - P6 CleanupActivities
-    crashes with NullReferenceException when Calendar/OBS/Currency/Role/RoleRate
-    are absent, so there is no point continuing without it.
+    Aborts with a clear error if the file is missing.
     """
     if not os.path.exists(ref_path):
         print()
@@ -179,7 +176,6 @@ def read_sheet(wb, name):
     if len(rows) < 3:
         return []
     headers = [str(h).strip() if h is not None else "" for h in rows[0]]
-    # row 2 = types (informational, not enforced at runtime)
     data = []
     for row in rows[2:]:
         if all(v is None for v in row):
@@ -201,9 +197,94 @@ def cell(rec, *keys):
     return None
 
 
+# ── UDFValue injection helper ─────────────────────────────────────────────────
+def _inject_udf(parent_el, udf_v, udf_type_lookup):
+    """
+    Append a <UDF> child to parent_el from a UDFValue sheet row.
+    udf_type_lookup: {Title: ObjectId}
+    """
+    title = cell(udf_v, "UDFTypeTitle")
+    if not title:
+        return
+    type_oid = (udf_type_lookup or {}).get(title)
+    if not type_oid:
+        print(f"  [WARN] UDFValue: UDFTypeTitle '{title}' not found in UDFType data — skipped")
+        return
+    udf_el = ET.SubElement(parent_el, "UDF")
+    make_tag(udf_el, "TypeObjectId", text=type_oid)
+    text_v = cell(udf_v, "TextValue")
+    num_v  = cell(udf_v, "NumberValue")
+    date_v = cell(udf_v, "DateValue")
+    ind_v  = cell(udf_v, "IndicatorValue")
+    if text_v:
+        make_tag(udf_el, "TextValue",      text=text_v)
+    elif num_v:
+        make_tag(udf_el, "NumberValue",    text=num_v)
+    elif date_v:
+        make_tag(udf_el, "DateValue",      text=fmt_date(date_v))
+    elif ind_v:
+        make_tag(udf_el, "IndicatorValue", text=ind_v)
+
+
+# ── ResourceAssignment builder ────────────────────────────────────────────────
+def build_resource_assignment_element(ra_data, act_oid_to_id, proj_oid):
+    """Build a <ResourceAssignment> element in P6 field order."""
+    ra_el = ET.Element("ResourceAssignment")
+
+    make_tag(ra_el, "ActualCost",            text=cell(ra_data, "ActualCost") or "0")
+    make_tag(ra_el, "ActualCurve",           nil=True)
+    make_tag(ra_el, "ActualFinishDate",      nil=True)
+    make_tag(ra_el, "ActualOvertimeCost",    text="0")
+    make_tag(ra_el, "ActualOvertimeUnits",   text="0.000000")
+    make_tag(ra_el, "ActualRegularCost",     text="0")
+    make_tag(ra_el, "ActualRegularUnits",    text="0.000000")
+    make_tag(ra_el, "ActualStartDate",       nil=True)
+    make_tag(ra_el, "ActualThisPeriodCost",  text="0")
+    make_tag(ra_el, "ActualThisPeriodUnits", text="0.000000")
+    make_tag(ra_el, "ActualUnits",           text=cell(ra_data, "ActualUnits") or "0.000000")
+
+    act_oid = cell(ra_data, "ActivityObjectId")
+    act_id  = cell(ra_data, "ActivityId") or (act_oid_to_id.get(act_oid, "") if act_oid else "")
+    make_tag(ra_el, "ActivityId",            text=act_id)
+    make_tag(ra_el, "ActivityObjectId",      text=act_oid or "")
+    make_tag(ra_el, "AutoComputeActuals",    text="1")
+
+    cost_acct = cell(ra_data, "CostAccountObjectId")
+    if cost_acct:
+        make_tag(ra_el, "CostAccountObjectId", text=cost_acct)
+    else:
+        make_tag(ra_el, "CostAccountObjectId", nil=True)
+
+    make_tag(ra_el, "GUID",                  text=new_guid())
+    make_tag(ra_el, "IsPrimaryResource",     text=cell(ra_data, "IsPrimaryResource") or "0")
+    make_tag(ra_el, "ObjectId",              text=cell(ra_data, "ObjectId") or "")
+    make_tag(ra_el, "OverBudgetCost",        text="0")
+    make_tag(ra_el, "OverBudgetUnits",       text="0.000000")
+    make_tag(ra_el, "OvertimeFactor",        text="0")
+    make_tag(ra_el, "PlannedCost",           text=cell(ra_data, "PlannedCost") or "0")
+    make_tag(ra_el, "PlannedCurve",          nil=True)
+    make_tag(ra_el, "PlannedUnits",          text=cell(ra_data, "PlannedUnits") or "0.000000")
+    make_tag(ra_el, "ProjectObjectId",       text=cell(ra_data, "ProjectObjectId") or proj_oid or "")
+    make_tag(ra_el, "RateSource",            text="Resource")
+    make_tag(ra_el, "RateType",              text=cell(ra_data, "RateType") or "Price / Unit")
+    make_tag(ra_el, "RemainingCost",         text=cell(ra_data, "RemainingCost") or "0")
+    make_tag(ra_el, "RemainingCurve",        nil=True)
+    make_tag(ra_el, "RemainingUnits",        text=cell(ra_data, "RemainingUnits") or "0.000000")
+    make_tag(ra_el, "ResourceCurveObjectId", nil=True)
+
+    res_id  = cell(ra_data, "ResourceId")
+    res_oid = cell(ra_data, "ResourceObjectId")
+    make_tag(ra_el, "ResourceId",            text=res_id or "")
+    make_tag(ra_el, "ResourceObjectId",      text=res_oid or "")
+    make_tag(ra_el, "RoleObjectId",          nil=True)
+
+    return ra_el
+
+
 # ── XML builders ─────────────────────────────────────────────────────────────
 def build_project_element(proj_data, wbs_list, activity_list,
-                          relationship_list, ra_list):
+                          relationship_list, ra_list,
+                          udf_value_list=None, udf_type_lookup=None):
     """Build the <Project> element with all nested children."""
     proj = ET.Element("Project")
 
@@ -312,7 +393,8 @@ def build_project_element(proj_data, wbs_list, activity_list,
         make_tag(wbs_el, "SequenceNumber",  text=cell(w, "SequenceNumber") or "0")
         make_tag(wbs_el, "Status",          text=cell(w, "Status") or "Active")
         make_tag(wbs_el, "WBSCategoryObjectId", nil=True)
-        # UDF — required on every WBS; emit if columns present in template
+
+        # UDF from WBS sheet columns (UDF_TypeObjectId / UDF_IndicatorValue)
         udf_type_oid = cell(w, "UDF_TypeObjectId")
         udf_ind_val  = cell(w, "UDF_IndicatorValue")
         if udf_type_oid:
@@ -320,20 +402,36 @@ def build_project_element(proj_data, wbs_list, activity_list,
             make_tag(udf_el, "TypeObjectId",   text=udf_type_oid)
             make_tag(udf_el, "IndicatorValue", text=udf_ind_val or "Green")
 
-    # ── Activities ────────────────────────────────────────────────────────────
-    # Build the set of WBS ObjectIds actually present so we can validate fallbacks
+        # UDF from UDFValue sheet — matched by WBS Code
+        wbs_code = cell(w, "Code")
+        for uv in (udf_value_list or []):
+            if cell(uv, "ObjectType") == "WBS" and cell(uv, "ObjectId_Ref") == wbs_code:
+                _inject_udf(wbs_el, uv, udf_type_lookup)
+
+    # ── Build activity lookup maps (used by both RA and Relationship sections) ──
+    act_oid_to_id = {}
+    act_oid_set   = set()
+    for a in activity_list:
+        oid = cell(a, "ObjectId")
+        aid = cell(a, "Id")
+        if oid:
+            act_oid_set.add(oid)
+            if aid:
+                act_oid_to_id[oid] = aid
+
+    # ── Build set of WBS ObjectIds for validation ─────────────────────────────
     wbs_oid_set = set()
     first_top_wbs_oid = None
     for w in wbs_list:
         oid = cell(w, "ObjectId")
         if oid:
             wbs_oid_set.add(oid)
-            # First top-level WBS (no parent) → use as fallback for unassigned activities
             if first_top_wbs_oid is None and not cell(w, "ParentObjectId"):
                 first_top_wbs_oid = oid
     if first_top_wbs_oid is None and wbs_oid_set:
         first_top_wbs_oid = sorted(wbs_oid_set)[0]
 
+    # ── Activities ────────────────────────────────────────────────────────────
     for a in activity_list:
         act_el = ET.SubElement(proj, "Activity")
 
@@ -395,6 +493,7 @@ def build_project_element(proj_data, wbs_list, activity_list,
         af("PlannedNonLaborCost",         default="0")
         af("PlannedNonLaborUnits",        default="0.000000")
         af("PlannedStartDate",            date=True)
+        # PrimaryConstraintDate/Type: emit value when filled, xsi:nil when blank
         af("PrimaryConstraintDate",       date=True)
         af("PrimaryConstraintType")
         af("PrimaryResourceObjectId")
@@ -416,14 +515,12 @@ def build_project_element(proj_data, wbs_list, activity_list,
         af("SuspendDate",                 date=True)
         af("Type",                        default="Task Dependent")
         af("UnitsPercentComplete",        default="0")
-        # WBSObjectId: use nil when template has no value (matches EC00630 behavior for
-        # project-level milestones).  Only use a value when explicitly set AND valid.
-        # Never fall back to an arbitrary WBS — an invalid reference crashes CleanupActivities.
+
+        # WBSObjectId — use nil when no value (valid for project-level activities)
         wbs_oid = cell(a, "WBSObjectId")
         if wbs_oid and wbs_oid in wbs_oid_set:
             make_tag(act_el, "WBSObjectId", text=wbs_oid)
         elif wbs_oid and wbs_oid not in wbs_oid_set:
-            # Referenced WBS not in import — warn and remap to first top-level WBS
             print(f"  [WARN] Activity {cell(a,'Id')}: WBSObjectId={wbs_oid} not in WBS list, "
                   f"remapped to {first_top_wbs_oid}")
             if first_top_wbs_oid:
@@ -431,10 +528,9 @@ def build_project_element(proj_data, wbs_list, activity_list,
             else:
                 make_tag(act_el, "WBSObjectId", nil=True)
         else:
-            # No value in template → nil (P6 treats as project-level activity, same as EC00630)
             make_tag(act_el, "WBSObjectId", nil=True)
 
-        # Activity codes (from columns Code1_TypeObjectId / Code1_ValueObjectId …)
+        # Activity codes (Code1_TypeObjectId / Code1_ValueObjectId …)
         for i in range(1, 6):
             type_oid = cell(a, f"Code{i}_TypeObjectId")
             val_oid  = cell(a, f"Code{i}_ValueObjectId")
@@ -443,57 +539,48 @@ def build_project_element(proj_data, wbs_list, activity_list,
                 make_tag(code_el, "TypeObjectId",  text=type_oid)
                 make_tag(code_el, "ValueObjectId", text=val_oid)
 
-    # ── Relationships ─────────────────────────────────────────────────────────
-    # Build map of activity ObjectId → string Id ("EC2430" etc.) so relationships
-    # can include both ObjectId-based and Id-based references.
-    # P6 uses the string ActivityId (task_code) to resolve relationships after
-    # remapping ObjectIds on new-project import — without it the FK check fails
-    # because the imported activity ObjectIds may differ from the XML ones.
-    act_oid_to_id = {}
-    act_oid_set   = set()
-    for a in activity_list:
-        oid = cell(a, "ObjectId")
-        aid = cell(a, "Id")
-        if oid:
-            act_oid_set.add(oid)
-            if aid:
-                act_oid_to_id[oid] = aid
+        # UDF from UDFValue sheet — matched by Activity Id
+        act_id_str = cell(a, "Id")
+        for uv in (udf_value_list or []):
+            if cell(uv, "ObjectType") == "Activity" and cell(uv, "ObjectId_Ref") == act_id_str:
+                _inject_udf(act_el, uv, udf_type_lookup)
 
+    # ── ResourceAssignments ───────────────────────────────────────────────────
+    proj_oid = cell(p, "ObjectId") or ""
+    for ra in (ra_list or []):
+        ra_el = build_resource_assignment_element(ra, act_oid_to_id, proj_oid)
+        proj.append(ra_el)
+
+    # ── Project-level UDFs ────────────────────────────────────────────────────
+    for uv in (udf_value_list or []):
+        if cell(uv, "ObjectType") == "Project":
+            _inject_udf(proj, uv, udf_type_lookup)
+
+    # ── Relationships ─────────────────────────────────────────────────────────
     proj_id = cell(p, "Id") or ""
 
     skipped_rels = 0
     for r in relationship_list:
         pred_oid = cell(r, "PredecessorActivityObjectId")
         succ_oid = cell(r, "SuccessorActivityObjectId")
-        # Drop relationship if either endpoint is not in this import —
-        # CleanupActivities will null-deref trying to link to a missing activity.
         if pred_oid not in act_oid_set or succ_oid not in act_oid_set:
             skipped_rels += 1
             print(f"  [WARN] Dropped relationship {cell(r,'ObjectId')}: "
                   f"pred={pred_oid}({'OK' if pred_oid in act_oid_set else 'MISSING'}) "
                   f"succ={succ_oid}({'OK' if succ_oid in act_oid_set else 'MISSING'})")
             continue
-        # Use explicit template column first, fall back to derived lookup
         pred_id = cell(r, "PredecessorActivityId") or act_oid_to_id.get(pred_oid, "")
         succ_id = cell(r, "SuccessorActivityId") or act_oid_to_id.get(succ_oid, "")
-
-        # PredecessorProjectId / SuccessorProjectId — string project Id (e.g. "DE1000").
-        # P6 uses these to locate the project when ObjectIds get remapped on new-project
-        # import; without them the activity-by-string-Id lookup has no project to search in.
-        pred_proj_id = cell(r, "PredecessorProjectId") or proj_id
-        succ_proj_id = cell(r, "SuccessorProjectId")   or proj_id
 
         rel_el = ET.SubElement(proj, "Relationship")
         make_tag(rel_el, "Lag",                         text=cell(r, "Lag") or "0.000000")
         make_tag(rel_el, "ObjectId",                    text=cell(r, "ObjectId") or "")
-        # String ActivityId fields: fallback for P6 to resolve when numeric OIDs are remapped.
-        # String ProjectId fields omitted — they can interfere with P6's import logic for new projects.
         make_tag(rel_el, "PredecessorActivityId",       text=pred_id)
         make_tag(rel_el, "PredecessorActivityObjectId", text=pred_oid)
-        make_tag(rel_el, "PredecessorProjectObjectId",  text=cell(r, "PredecessorProjectObjectId") or cell(p, "ObjectId") or "")
+        make_tag(rel_el, "PredecessorProjectObjectId",  text=cell(r, "PredecessorProjectObjectId") or proj_oid)
         make_tag(rel_el, "SuccessorActivityId",         text=succ_id)
         make_tag(rel_el, "SuccessorActivityObjectId",   text=succ_oid)
-        make_tag(rel_el, "SuccessorProjectObjectId",    text=cell(r, "SuccessorProjectObjectId") or cell(p, "ObjectId") or "")
+        make_tag(rel_el, "SuccessorProjectObjectId",    text=cell(r, "SuccessorProjectObjectId") or proj_oid)
         make_tag(rel_el, "Type",                        text=cell(r, "Type") or "Finish to Start")
 
     return proj
@@ -556,7 +643,7 @@ def build_activity_code_element(ac_data):
 
 
 def build_activity_code_type_element(act_data):
-    """Build a top-level <ActivityCodeType> element from the ActivityCodeType sheet."""
+    """Build a top-level <ActivityCodeType> element."""
     el = ET.Element("ActivityCodeType")
     make_tag(el, "EPSObjectId",         nil=True)
     make_tag(el, "IsSecureCode",        text=cell(act_data, "IsSecureCode") or "0")
@@ -571,7 +658,7 @@ def build_activity_code_type_element(act_data):
 
 
 def build_udf_type_element(udf_data):
-    """Build a top-level <UDFType> element matching EC00630 field order."""
+    """Build a top-level <UDFType> element."""
     el = ET.Element("UDFType")
     make_tag(el, "DataType",      text=cell(udf_data, "DataType") or "Indicator")
     make_tag(el, "IsSecureCode",  text=cell(udf_data, "IsSecureCode") or "0")
@@ -586,7 +673,6 @@ def prettify(element):
     rough = ET.tostring(element, encoding="unicode")
     reparsed = minidom.parseString(rough.encode("utf-8"))
     lines = reparsed.toprettyxml(indent="  ", encoding=None).splitlines()
-    # minidom adds an extra XML declaration; we'll add our own
     return "\n".join(l for l in lines if l.strip() and not l.startswith("<?xml"))
 
 
@@ -611,6 +697,7 @@ def write_p6_xml(root_el, path):
     print(f"    Top-level  — Resource:{cnt('Resource')} "
           f"ActivityCodeType:{cnt('ActivityCodeType')} ActivityCode:{cnt('ActivityCode')}")
     print(f"    In Project — WBS:{pcnt('WBS')} Activity:{pcnt('Activity')} "
+          f"ResourceAssignment:{pcnt('ResourceAssignment')} "
           f"Relationship:{pcnt('Relationship')}")
 
 
@@ -619,7 +706,6 @@ def main():
     template_path = sys.argv[1] if len(sys.argv) > 1 else "P6_Import_Template.xlsx"
     output_arg    = sys.argv[2] if len(sys.argv) > 2 else "P6_Import_test.xml"
 
-    # Output files written to the same directory as the template
     out_dir    = os.path.dirname(os.path.abspath(template_path))
     pass1_path = os.path.join(out_dir, "P6_Import_pass1.xml")
     pass2_path = os.path.join(out_dir, "P6_Import_pass2.xml")
@@ -639,6 +725,8 @@ def main():
     act_rows_ac = read_sheet(wb, "ActivityCodeType")
     ac_rows     = read_sheet(wb, "ActivityCode")
     res_rows    = read_sheet(wb, "Resource")
+    ra_rows     = read_sheet(wb, "ResourceAssignment")
+    udf_val_rows = read_sheet(wb, "UDFValue")
 
     if not proj_rows:
         print("ERROR: No Project data found in template.")
@@ -650,13 +738,33 @@ def main():
     if cfg.get("OBSObjectId"):
         DEFAULT_OBS_OID = cfg["OBSObjectId"]
 
-    # Load required global reference elements from p6_reference.xml.
-    # Calendar/OBS/Currency/Role/RoleRate must be present in EVERY import XML
-    # or P6 CleanupActivities crashes with a NullReferenceException.
+    # Load required global reference elements from p6_reference.xml
     ref_xml = os.path.join(os.path.dirname(os.path.abspath(template_path)), "p6_reference.xml")
     ref_els = load_reference_elements(
         ref_xml, "Currency", "UDFType", "OBS", "Calendar", "Role", "RoleRate"
     )
+
+    # ── Build UDFType title -> ObjectId lookup for UDFValue resolution ─────────
+    # Prefer the UDFType sheet; fall back to p6_reference.xml elements.
+    udf_type_lookup = {}
+    if udf_rows:
+        for u in udf_rows:
+            title = cell(u, "Title")
+            oid   = cell(u, "ObjectId")
+            if title and oid:
+                udf_type_lookup[title] = oid
+    else:
+        for el in ref_els.get("UDFType", []):
+            title_el = el.find(f"{{{NS_BO}}}Title")
+            oid_el   = el.find(f"{{{NS_BO}}}ObjectId")
+            if title_el is not None and oid_el is not None and title_el.text and oid_el.text:
+                udf_type_lookup[title_el.text] = oid_el.text
+    if udf_type_lookup:
+        print(f"  UDFType lookup: {len(udf_type_lookup)} types")
+    if udf_val_rows:
+        print(f"  UDFValue rows : {len(udf_val_rows)}")
+    if ra_rows:
+        print(f"  ResourceAssignment rows: {len(ra_rows)}")
 
     ET.register_namespace("",    NS_BO)
     ET.register_namespace("xsi", NS_XSI)
@@ -694,14 +802,18 @@ def main():
             root.append(el)
         return root
 
-    # Build the full project element (WBS + Activities + Relationships)
-    proj_full = build_project_element(proj_rows[0], wbs_rows, act_rows, rel_rows, [])
+    # Build the full project element
+    proj_full = build_project_element(
+        proj_rows[0], wbs_rows, act_rows, rel_rows, ra_rows,
+        udf_value_list=udf_val_rows,
+        udf_type_lookup=udf_type_lookup,
+    )
     proj_full.tag = f"{{{NS_BO}}}Project"
     add_ns(proj_full)
 
     # ── Pass 1: Create New Project ────────────────────────────────────────────
     # Global refs + Resource + ActivityCodeType + ActivityCode
-    # Project → scalars + WBS + Activity  (NO Relationship)
+    # Project: scalars + WBS + Activity + ResourceAssignment  (NO Relationship)
     root1 = make_ref_root()
     for r in res_rows:
         res_el = build_resource_element(r)
@@ -722,14 +834,16 @@ def main():
     root1.append(proj1)
 
     # ── Pass 2: Update Existing Project ───────────────────────────────────────
-    # Global refs only (no Resource/ActivityCodeType/ActivityCode — already in DB)
-    # Project → scalars + Activity (same ObjectIds, P6 matches & updates)
-    #           + Relationship  (NO WBS — already in DB from pass 1)
+    # Global refs only
+    # Project: scalars + Activity (same ObjectIds) + Relationship  (NO WBS)
     root2 = make_ref_root()
 
     proj2 = copy.deepcopy(proj_full)
     for wbs in proj2.findall(f"{{{NS_BO}}}WBS"):
         proj2.remove(wbs)
+    # Also strip ResourceAssignment from pass 2 — already committed via pass 1
+    for ra in proj2.findall(f"{{{NS_BO}}}ResourceAssignment"):
+        proj2.remove(ra)
     root2.append(proj2)
 
     # ── Write both files ──────────────────────────────────────────────────────
