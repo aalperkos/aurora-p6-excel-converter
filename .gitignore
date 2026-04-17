@@ -8,6 +8,12 @@ P6_Import_test.xml
 p6_reference.xml
 EC00630.xml
 
+# PyInstaller build artifacts
+*.exe
+*.spec
+build/
+dist/
+
 # Development / test files
 fill_template.py
 test_*.xml
