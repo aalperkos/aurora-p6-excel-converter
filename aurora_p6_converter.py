@@ -239,26 +239,35 @@ def _inject_udf(parent_el, udf_v, udf_type_lookup):
 
 # ── ResourceAssignment builder ────────────────────────────────────────────────
 def build_resource_assignment_element(ra_data, act_oid_to_id, proj_oid):
-    """Build a <ResourceAssignment> element in P6 field order."""
+    """
+    Build a <ResourceAssignment> element matching EC00630 field order.
+    ActivityObjectId is first — P6 uses it as the primary FK lookup.
+    """
     ra_el = ET.Element("ResourceAssignment")
-
-    make_tag(ra_el, "ActualCost",            text=cell(ra_data, "ActualCost") or "0")
-    make_tag(ra_el, "ActualCurve",           nil=True)
-    make_tag(ra_el, "ActualFinishDate",      nil=True)
-    make_tag(ra_el, "ActualOvertimeCost",    text="0")
-    make_tag(ra_el, "ActualOvertimeUnits",   text="0.000000")
-    make_tag(ra_el, "ActualRegularCost",     text="0")
-    make_tag(ra_el, "ActualRegularUnits",    text="0.000000")
-    make_tag(ra_el, "ActualStartDate",       nil=True)
-    make_tag(ra_el, "ActualThisPeriodCost",  text="0")
-    make_tag(ra_el, "ActualThisPeriodUnits", text="0.000000")
-    make_tag(ra_el, "ActualUnits",           text=cell(ra_data, "ActualUnits") or "0.000000")
 
     act_oid = cell(ra_data, "ActivityObjectId")
     act_id  = cell(ra_data, "ActivityId") or (act_oid_to_id.get(act_oid, "") if act_oid else "")
-    make_tag(ra_el, "ActivityId",            text=act_id)
+    res_oid = cell(ra_data, "ResourceObjectId")
+    res_id  = cell(ra_data, "ResourceId")
+
+    # ActivityObjectId FIRST — matches EC00630 element order
     make_tag(ra_el, "ActivityObjectId",      text=act_oid or "")
-    make_tag(ra_el, "AutoComputeActuals",    text="1")
+    make_tag(ra_el, "ActualCost",            text=cell(ra_data, "ActualCost") or "0.000000")
+    make_tag(ra_el, "ActualCurve",           nil=True)
+    make_tag(ra_el, "ActualFinishDate",      nil=True)
+    make_tag(ra_el, "ActualOvertimeCost",    text="0.000000")
+    make_tag(ra_el, "ActualOvertimeUnits",   text="0.000000")
+    make_tag(ra_el, "ActualRegularCost",     text="0.000000")
+    make_tag(ra_el, "ActualRegularUnits",    text="0.000000")
+    make_tag(ra_el, "ActualStartDate",       nil=True)
+    make_tag(ra_el, "ActualThisPeriodCost",  text="0.000000")
+    make_tag(ra_el, "ActualThisPeriodUnits", text="0.000000")
+    make_tag(ra_el, "ActualUnits",           text=cell(ra_data, "ActualUnits") or "0.000000")
+    # AtCompletion — derive from Planned when not supplied
+    planned_cost  = cell(ra_data, "PlannedCost")  or "0.000000"
+    planned_units = cell(ra_data, "PlannedUnits") or "0.000000"
+    make_tag(ra_el, "AtCompletionCost",      text=cell(ra_data, "AtCompletionCost")  or planned_cost)
+    make_tag(ra_el, "AtCompletionUnits",     text=cell(ra_data, "AtCompletionUnits") or planned_units)
 
     cost_acct = cell(ra_data, "CostAccountObjectId")
     if cost_acct:
@@ -266,28 +275,66 @@ def build_resource_assignment_element(ra_data, act_oid_to_id, proj_oid):
     else:
         make_tag(ra_el, "CostAccountObjectId", nil=True)
 
+    make_tag(ra_el, "DrivingActivityDatesFlag", text="1")
+    planned_finish = cell(ra_data, "PlannedFinishDate")
+    planned_start  = cell(ra_data, "PlannedStartDate")
+    if planned_finish:
+        make_tag(ra_el, "FinishDate", text=fmt_date(planned_finish))
+    else:
+        make_tag(ra_el, "FinishDate", nil=True)
     make_tag(ra_el, "GUID",                  text=new_guid())
+    make_tag(ra_el, "IsCostUnitsLinked",     text="1")
     make_tag(ra_el, "IsPrimaryResource",     text=cell(ra_data, "IsPrimaryResource") or "0")
     make_tag(ra_el, "ObjectId",              text=cell(ra_data, "ObjectId") or "")
-    make_tag(ra_el, "OverBudgetCost",        text="0")
-    make_tag(ra_el, "OverBudgetUnits",       text="0.000000")
     make_tag(ra_el, "OvertimeFactor",        text="0")
-    make_tag(ra_el, "PlannedCost",           text=cell(ra_data, "PlannedCost") or "0")
+    make_tag(ra_el, "PlannedCost",           text=planned_cost)
     make_tag(ra_el, "PlannedCurve",          nil=True)
-    make_tag(ra_el, "PlannedUnits",          text=cell(ra_data, "PlannedUnits") or "0.000000")
+    if planned_finish:
+        make_tag(ra_el, "PlannedFinishDate", text=fmt_date(planned_finish))
+    else:
+        make_tag(ra_el, "PlannedFinishDate", nil=True)
+    make_tag(ra_el, "PlannedLag",            text="0.000000")
+    if planned_start:
+        make_tag(ra_el, "PlannedStartDate",  text=fmt_date(planned_start))
+    else:
+        make_tag(ra_el, "PlannedStartDate",  nil=True)
+    make_tag(ra_el, "PlannedUnits",          text=planned_units)
+    make_tag(ra_el, "PlannedUnitsPerTime",   text=cell(ra_data, "PlannedUnitsPerTime") or "0.000000")
+    make_tag(ra_el, "Proficiency",           text=cell(ra_data, "Proficiency") or "3 - Skilled")
     make_tag(ra_el, "ProjectObjectId",       text=cell(ra_data, "ProjectObjectId") or proj_oid or "")
     make_tag(ra_el, "RateSource",            text="Resource")
     make_tag(ra_el, "RateType",              text=cell(ra_data, "RateType") or "Price / Unit")
-    make_tag(ra_el, "RemainingCost",         text=cell(ra_data, "RemainingCost") or "0")
+    rem_cost  = cell(ra_data, "RemainingCost")  or planned_cost
+    rem_units = cell(ra_data, "RemainingUnits") or planned_units
+    make_tag(ra_el, "RemainingCost",         text=rem_cost)
     make_tag(ra_el, "RemainingCurve",        nil=True)
-    make_tag(ra_el, "RemainingUnits",        text=cell(ra_data, "RemainingUnits") or "0.000000")
+    make_tag(ra_el, "RemainingDuration",     text=cell(ra_data, "RemainingDuration") or "0.000000")
+    if planned_finish:
+        make_tag(ra_el, "RemainingFinishDate", text=fmt_date(planned_finish))
+    else:
+        make_tag(ra_el, "RemainingFinishDate", nil=True)
+    make_tag(ra_el, "RemainingLag",          text="0.000000")
+    if planned_start:
+        make_tag(ra_el, "RemainingStartDate", text=fmt_date(planned_start))
+    else:
+        make_tag(ra_el, "RemainingStartDate", nil=True)
+    make_tag(ra_el, "RemainingUnits",        text=rem_units)
+    make_tag(ra_el, "RemainingUnitsPerTime", text=cell(ra_data, "RemainingUnitsPerTime") or "0.000000")
     make_tag(ra_el, "ResourceCurveObjectId", nil=True)
-
-    res_id  = cell(ra_data, "ResourceId")
-    res_oid = cell(ra_data, "ResourceObjectId")
-    make_tag(ra_el, "ResourceId",            text=res_id or "")
     make_tag(ra_el, "ResourceObjectId",      text=res_oid or "")
+    make_tag(ra_el, "ResourceType",          text=cell(ra_data, "ResourceType") or "Labor")
     make_tag(ra_el, "RoleObjectId",          nil=True)
+    if planned_start:
+        make_tag(ra_el, "StartDate",         text=fmt_date(planned_start))
+    else:
+        make_tag(ra_el, "StartDate",         nil=True)
+    make_tag(ra_el, "UnitsPercentComplete",  text="0")
+
+    wbs_oid = cell(ra_data, "WBSObjectId")
+    if wbs_oid:
+        make_tag(ra_el, "WBSObjectId",       text=wbs_oid)
+    else:
+        make_tag(ra_el, "WBSObjectId",       nil=True)
 
     return ra_el
 
