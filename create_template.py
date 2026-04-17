@@ -287,29 +287,48 @@ for r in proj.findall(f"{{{NS}}}Relationship"):
 
 # ── RESOURCEASSIGNMENT sheet ──────────────────────────────────────────────────
 ra_headers = [
-    "ProjectId","ActivityId","ResourceId","RateType",
-    "PlannedUnits","PlannedCost","ActualUnits","ActualCost",
-    "RemainingUnits","RemainingCost","IsPrimaryResource",
-    "ObjectId","ActivityObjectId","ResourceObjectId","ProjectObjectId",
+    "ProjectId","ActivityId","ResourceId","ResourceType","RateType",
+    "PlannedUnits","PlannedCost","PlannedUnitsPerTime",
+    "PlannedStartDate","PlannedFinishDate",
+    "ActualUnits","ActualCost",
+    "RemainingUnits","RemainingCost","RemainingDuration",
+    "IsPrimaryResource","Proficiency",
+    "ObjectId","ActivityObjectId","ResourceObjectId","ProjectObjectId","WBSObjectId",
 ]
 ra_types = [
-    "Lookup","Lookup","Lookup","Enum",
-    "Unit","Cost","Unit","Cost",
-    "Unit","Cost","Boolean",
-    "ObjectId","ObjectId","ObjectId","ObjectId",
+    "Lookup","Lookup","Lookup","Enum","Enum",
+    "Unit","Cost","Float",
+    "Date","Date",
+    "Unit","Cost",
+    "Unit","Cost","Duration",
+    "Boolean","Enum",
+    "ObjectId","ObjectId","ObjectId","ObjectId","ObjectId",
 ]
+
+# Only include sample RAs whose ActivityObjectId is in the 5-activity sample set,
+# so the sample data is self-consistent and importable.
 ra_sample_rows = []
-for ra in proj.findall(f"{{{NS}}}ResourceAssignment")[:3]:
+for ra in proj.findall(f"{{{NS}}}ResourceAssignment"):
+    act_oid = fv(ra, "ActivityObjectId")
+    if act_oid not in sample_act_oids:
+        continue
     ra_sample_rows.append([
-        fv(ra,"ProjectId"),      fv(ra,"ActivityId"),   fv(ra,"ResourceId"),
-        fv(ra,"RateType"),
-        fv(ra,"PlannedUnits"),   fv(ra,"PlannedCost"),
-        fv(ra,"ActualUnits"),    fv(ra,"ActualCost"),
-        fv(ra,"RemainingUnits"), fv(ra,"RemainingCost"),
-        fv(ra,"IsPrimaryResource"),
-        fv(ra,"ObjectId"),       fv(ra,"ActivityObjectId"),
-        fv(ra,"ResourceObjectId"), fv(ra,"ProjectObjectId"),
+        fv(ra,"ProjectId"),
+        fv(ra,"ActivityId"),        fv(ra,"ResourceId"),
+        fv(ra,"ResourceType"),      fv(ra,"RateType"),
+        fv(ra,"PlannedUnits"),      fv(ra,"PlannedCost"),
+        fv(ra,"PlannedUnitsPerTime"),
+        fv(ra,"PlannedStartDate"),  fv(ra,"PlannedFinishDate"),
+        fv(ra,"ActualUnits"),       fv(ra,"ActualCost"),
+        fv(ra,"RemainingUnits"),    fv(ra,"RemainingCost"),
+        fv(ra,"RemainingDuration"),
+        fv(ra,"IsPrimaryResource"), fv(ra,"Proficiency"),
+        fv(ra,"ObjectId"),          act_oid,
+        fv(ra,"ResourceObjectId"),  fv(ra,"ProjectObjectId"),
+        fv(ra,"WBSObjectId"),
     ])
+    if len(ra_sample_rows) >= 3:
+        break
 
 # ── UDFTYPE sheet ─────────────────────────────────────────────────────────────
 udftype_headers = ["ObjectId","DataType","SubjectArea","Title","IsSecureCode"]
