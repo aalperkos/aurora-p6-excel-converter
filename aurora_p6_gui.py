@@ -3,9 +3,11 @@ AURORA P6 Converter - GUI
 Direct-import front-end for:
   create_template        (Excel template generator)
   aurora_p6_converter    (Excel -> P6 XML)
+  excel_to_opc_converter (Excel -> OPC XML)
   msp_to_p6_converter    (MS Project XML -> P6 XML)
+  msp_to_opc_converter   (MS Project XML -> OPC XML)
 
-All three converter modules are bundled inside the exe by PyInstaller via
+All converter modules are bundled inside the exe by PyInstaller via
 normal import discovery — no external Python executable required.
 """
 
@@ -32,6 +34,7 @@ if APP_DIR not in sys.path:
 
 import create_template
 import aurora_p6_converter
+import excel_to_opc_converter
 import msp_to_p6_converter
 import msp_to_opc_converter
 
@@ -53,6 +56,8 @@ C_MSP_BG     = "#5B4A9E"
 C_MSP_ACT    = "#42357A"
 C_OPC_BG     = "#1B6B3A"
 C_OPC_ACT    = "#134D2A"
+C_XOPC_BG   = "#4A235A"
+C_XOPC_ACT  = "#321840"
 C_RBD_BG     = "#B85C00"
 C_RBD_ACT    = "#8A4400"
 C_LOG_BG     = "#1E1E1E"
@@ -94,7 +99,11 @@ class App(tk.Tk):
         self._msp_base     = None
         self._rebind_btn   = None
 
-        # OPC tab state
+        # Excel → OPC tab state
+        self._xopc_ref_var      = tk.StringVar()
+        self._xopc_template_var = tk.StringVar()
+
+        # MSP → OPC tab state
         self._opc_msp_var  = tk.StringVar()
         self._opc_ref_var  = tk.StringVar()
 
@@ -116,7 +125,8 @@ class App(tk.Tk):
         tk.Label(hdr, text="AURORA P6 Converter",
                  font=FONT_TITLE, bg=C_HEADER_BG, fg=C_HEADER_FG).pack()
         tk.Label(hdr,
-                 text="Excel \u2192 P6 XML  |  MS Project XML \u2192 P6 XML  |  MS Project XML \u2192 OPC XML",
+                 text="Excel \u2192 P6 XML  |  Excel \u2192 OPC XML  |  "
+                      "MS Project \u2192 P6 XML  |  MS Project \u2192 OPC XML",
                  font=("Segoe UI", 9), bg=C_HEADER_BG, fg="#BDD7EE").pack()
 
         # Notebook
@@ -131,6 +141,10 @@ class App(tk.Tk):
         tab1 = tk.Frame(nb, bg=C_SECTION_BG)
         nb.add(tab1, text="  Excel \u2192 P6  ")
         self._build_excel_tab(tab1)
+
+        tab_xopc = tk.Frame(nb, bg=C_SECTION_BG)
+        nb.add(tab_xopc, text="  Excel \u2192 OPC  ")
+        self._build_excel_opc_tab(tab_xopc)
 
         tab2 = tk.Frame(nb, bg=C_SECTION_BG)
         nb.add(tab2, text="  MS Project \u2192 P6  ")
@@ -455,6 +469,165 @@ class App(tk.Tk):
 
         self._run_module_func(aurora_p6_converter.main, done,
                               argv=["aurora_p6_converter", template])
+
+    # ======================================================================
+    # EXCEL → OPC TAB
+    # ======================================================================
+    def _build_excel_opc_tab(self, parent):
+        _, content = self._make_scrollable(parent)
+        pad = dict(padx=16, pady=8)
+
+        s1 = self._section(content, "Step 1 \u2014 P6 / OPC Reference File")
+        s1.pack(fill="x", **pad)
+        tk.Label(s1, text=(
+            "Export any project from P6 or OPC: File \u2192 Export \u2192 Primavera P6 XML.\n"
+            "Rename the exported file and select it below."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 6))
+        self._file_row(s1, self._xopc_ref_var, self._browse_xopc_ref)
+        self._btn(s1, "Generate Template  (create_template.py)",
+                  self._run_xopc_generate,
+                  bg=C_GEN_BG, abg=C_GEN_ACT,
+                  font=("Segoe UI", 10, "bold"), pady=6
+                  ).pack(padx=8, pady=(2, 10), anchor="w")
+
+        s2 = self._section(content, "Step 2 \u2014 Convert Filled Template to OPC XML")
+        s2.pack(fill="x", **pad)
+        tk.Label(s2, text=(
+            "Open P6_Import_Template.xlsx, fill in your data, save, then select it below.\n"
+            "UDFType fields of type Indicator or Formula are skipped automatically.\n"
+            "WBS Summary activity type is not supported in OPC and is filtered out."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 6))
+        self._file_row(s2, self._xopc_template_var, self._browse_xopc_template)
+        self._btn(s2, "Convert to OPC XML  (excel_to_opc_converter.py)",
+                  self._run_xopc_convert,
+                  bg=C_XOPC_BG, abg=C_XOPC_ACT,
+                  font=("Segoe UI", 10, "bold"), pady=6
+                  ).pack(padx=8, pady=(2, 6), anchor="w")
+
+        out_frame = tk.Frame(s2, bg="#E8EEF4", relief="flat", bd=0)
+        out_frame.pack(fill="x", padx=8, pady=(0, 10))
+        tk.Label(out_frame, text="Output file:", font=FONT_SECTION,
+                 bg="#E8EEF4", fg="#1F4E79").pack(anchor="w", padx=8, pady=(6, 2))
+        self._xopc_out_var = tk.StringVar(value="  (not yet generated)")
+        row = tk.Frame(out_frame, bg="#E8EEF4")
+        row.pack(fill="x", padx=8, pady=1)
+        tk.Label(row, text="OPC:", font=FONT_SECTION, bg="#E8EEF4",
+                 fg="#555555", width=8, anchor="w").pack(side="left")
+        tk.Label(row, textvariable=self._xopc_out_var, font=FONT_PATH,
+                 bg="#E8EEF4", fg="#1A1A2E", anchor="w").pack(side="left", fill="x")
+        tk.Frame(out_frame, bg="#E8EEF4", height=6).pack()
+
+        s3 = self._section(content, "Step 3 \u2014 Import into Oracle Primavera Cloud")
+        s3.pack(fill="x", **pad)
+        self._instr_text(s3, (
+            "Single-pass import \u2014 one XML file, one import action:\n"
+            "  1. Open your OPC project space\n"
+            "  2. Navigate to: Projects \u2192 Import\n"
+            "  3. Select  {base}_OPC.xml\n"
+            "  4. Follow the import wizard\n"
+            "\n"
+            "After import:\n"
+            "  \u26a0  Reschedule the project manually in OPC\n"
+            "  \u26a0  Recalculate costs manually in OPC\n"
+            "\n"
+            "Notes:\n"
+            "  \u2022  UDFType fields of type Indicator or Formula are not supported\n"
+            "     in OPC and are automatically excluded from the output file.\n"
+            "  \u2022  Activities with Type 'WBS Summary' are filtered out;\n"
+            "     represent those levels as WBS elements on the WBS sheet.\n"
+            "  \u2022  Project ID is truncated to 20 characters (OPC limit)."
+        ), height=16)
+
+    # ------------------------------------------------------------------
+    # Excel OPC tab — file browsers
+    # ------------------------------------------------------------------
+    def _browse_xopc_ref(self):
+        path = filedialog.askopenfilename(
+            title="Select P6 / OPC Reference XML",
+            filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
+        )
+        if path:
+            self._xopc_ref_var.set(path)
+
+    def _browse_xopc_template(self):
+        path = filedialog.askopenfilename(
+            title="Select filled P6_Import_Template.xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
+        )
+        if path:
+            self._xopc_template_var.set(path)
+
+    # ------------------------------------------------------------------
+    # Excel OPC tab — Generate Template (reuses create_template)
+    # ------------------------------------------------------------------
+    def _run_xopc_generate(self):
+        work_dir = SCRIPTS_DIR
+        if not self._prepare_ref(self._xopc_ref_var.get(), work_dir, "Step 1"):
+            return
+        self._log_line("--- Generate Template (for OPC) ---", "info")
+
+        def done(rc):
+            if rc == 0:
+                self._log_line("Template generated successfully.", "ok")
+                messagebox.showinfo(
+                    "Template Generated",
+                    f"P6_Import_Template.xlsx created in:\n{work_dir}\n\n"
+                    "Open it, fill in your project data, then use Step 2 to convert to OPC XML.\n\n"
+                    "Note: Leave Activity Type blank or use 'Task Dependent' / 'Start Milestone'.\n"
+                    "WBS Summary activities are not supported in OPC."
+                )
+            else:
+                self._log_line("Template generation failed. See log.", "err")
+                messagebox.showerror("Error",
+                                     "create_template failed.\nSee the Log for details.")
+
+        self._run_module_func(lambda: create_template.main(work_dir), done)
+
+    # ------------------------------------------------------------------
+    # Excel OPC tab — Convert to OPC XML
+    # ------------------------------------------------------------------
+    def _run_xopc_convert(self):
+        template = self._xopc_template_var.get().strip()
+        if not template:
+            messagebox.showerror("Missing Template",
+                                 "Please select P6_Import_Template.xlsx (Step 2).")
+            return
+        if not os.path.isfile(template):
+            messagebox.showerror("File Not Found", f"Template not found:\n{template}")
+            return
+        if not self._prepare_ref(self._xopc_ref_var.get(), APP_DIR, "Step 1"):
+            return
+
+        out_dir  = os.path.dirname(os.path.abspath(template))
+        base     = os.path.splitext(os.path.basename(template))[0]
+        opc_out  = os.path.join(out_dir, f"{base}_OPC.xml")
+
+        self._log_line("--- Excel Convert to OPC XML ---", "info")
+
+        def done(rc):
+            if rc == 0:
+                self._xopc_out_var.set(opc_out)
+                self._log_line("Conversion complete.", "ok")
+                self._log_line(
+                    "[WARN] After OPC import: reschedule project and recalculate costs manually in OPC",
+                    "warn"
+                )
+                messagebox.showinfo(
+                    "Conversion Complete",
+                    f"OPC XML file created:\n{opc_out}\n\n"
+                    "After importing into Oracle Primavera Cloud:\n"
+                    "  \u26a0  Reschedule the project manually\n"
+                    "  \u26a0  Recalculate costs manually"
+                )
+            else:
+                self._log_line("Conversion failed. See log.", "err")
+                messagebox.showerror("Error",
+                                     "excel_to_opc_converter failed.\nSee the Log for details.")
+
+        self._run_module_func(excel_to_opc_converter.main, done,
+                              argv=["excel_to_opc_converter", template, out_dir])
 
     # ======================================================================
     # MSP TAB
