@@ -537,8 +537,16 @@ class App(tk.Tk):
             "     in OPC and are automatically excluded from the output file.\n"
             "  \u2022  Activities with Type 'WBS Summary' are filtered out;\n"
             "     represent those levels as WBS elements on the WBS sheet.\n"
-            "  \u2022  Project ID is truncated to 20 characters (OPC limit)."
-        ), height=16)
+            "  \u2022  Project ID is truncated to 20 characters (OPC limit).\n"
+            "  \u2022  ResourceAssignment units may differ after OPC import.\n"
+            "     OPC recalculates units differently. Verify after import.\n"
+            "  \u2022  Baseline import not supported via Excel template.\n"
+            "     To use as baseline: import as project first, export from OPC\n"
+            "     as XML, then re-import as baseline.\n"
+            "  \u2022  MSP Integration must be configured in OPC by admin first.\n"
+            "     Navigate: Global Admin \u2192 Integrations \u2192\n"
+            "     Microsoft Project Connection"
+        ), height=21)
 
     # ------------------------------------------------------------------
     # Excel OPC tab — file browsers
@@ -961,8 +969,16 @@ class App(tk.Tk):
             "  \u2022  UDFType fields of type Indicator or Formula are not supported in OPC\n"
             "     and are automatically excluded from the output file.\n"
             "  \u2022  WBS Summary activity type is not used; summary tasks become WBS elements.\n"
-            "  \u2022  Project ID is truncated to 20 characters (OPC limit)."
-        ), height=16)
+            "  \u2022  Project ID is truncated to 20 characters (OPC limit).\n"
+            "  \u2022  ResourceAssignment units may differ after OPC import.\n"
+            "     OPC recalculates units differently. Verify after import.\n"
+            "  \u2022  Baseline import not supported via MSP XML.\n"
+            "     To use as baseline: import as project first, export from OPC\n"
+            "     as XML, then re-import as baseline.\n"
+            "  \u2022  MSP Integration must be configured in OPC by admin first.\n"
+            "     Navigate: Global Admin \u2192 Integrations \u2192\n"
+            "     Microsoft Project Connection"
+        ), height=21)
 
     # ------------------------------------------------------------------
     # OPC tab — file browsers
