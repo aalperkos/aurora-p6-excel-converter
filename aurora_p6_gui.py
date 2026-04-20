@@ -1,21 +1,23 @@
 """
 AURORA P6 Converter - GUI
-Tkinter front-end for:
-  create_template.py        (Excel template generator)
-  aurora_p6_converter.py    (Excel → P6 XML)
-  msp_to_p6_converter.py    (MS Project XML → P6 XML)
+Direct-import front-end for:
+  create_template        (Excel template generator)
+  aurora_p6_converter    (Excel -> P6 XML)
+  msp_to_p6_converter    (MS Project XML -> P6 XML)
+
+All three converter modules are bundled inside the exe by PyInstaller via
+normal import discovery — no external Python executable required.
 """
 
 import os
 import sys
 import shutil
-import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
 
 # ---------------------------------------------------------------------------
-# Path resolution — works both frozen (PyInstaller) and from source
+# Path resolution
 # ---------------------------------------------------------------------------
 if getattr(sys, "frozen", False):
     APP_DIR    = sys._MEIPASS
@@ -24,18 +26,13 @@ else:
     APP_DIR    = os.path.dirname(os.path.abspath(__file__))
     SCRIPTS_DIR = APP_DIR
 
+# Ensure APP_DIR is on sys.path so the bundled converter modules are importable
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
 
-def get_python():
-    if getattr(sys, "frozen", False):
-        py = shutil.which("py") or shutil.which("python3") or shutil.which("python")
-        if py:
-            return py
-        messagebox.showerror(
-            "Python Not Found",
-            "Could not locate Python. Install Python 3.9+ and ensure it is on PATH."
-        )
-        return None
-    return sys.executable
+import create_template
+import aurora_p6_converter
+import msp_to_p6_converter
 
 
 # ---------------------------------------------------------------------------
@@ -89,10 +86,10 @@ class App(tk.Tk):
         # MSP tab state
         self._msp_var      = tk.StringVar()
         self._msp_ref_var  = tk.StringVar()
-        self._msp_path     = None   # resolved after convert
+        self._msp_path     = None
         self._msp_out_dir  = None
         self._msp_base     = None
-        self._rebind_btn   = None   # enabled after convert
+        self._rebind_btn   = None
 
         self._build_ui()
         self._center_window(820, 860)
@@ -106,7 +103,7 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------
     def _build_ui(self):
-        # ---- Header ----
+        # Header
         hdr = tk.Frame(self, bg=C_HEADER_BG, pady=12)
         hdr.pack(fill="x")
         tk.Label(hdr, text="AURORA P6 Converter",
@@ -115,15 +112,14 @@ class App(tk.Tk):
                  text="Excel \u2192 P6 XML  |  MS Project XML \u2192 P6 XML",
                  font=("Segoe UI", 9), bg=C_HEADER_BG, fg="#BDD7EE").pack()
 
-        # ---- Notebook ----
+        # Notebook
         style = ttk.Style(self)
-        style.configure("TNotebook",        background=C_SECTION_BG)
-        style.configure("TNotebook.Tab",    font=("Segoe UI", 10, "bold"),
-                                            padding=[14, 6])
-        style.configure("TFrame",           background=C_SECTION_BG)
+        style.configure("TNotebook",     background=C_SECTION_BG)
+        style.configure("TNotebook.Tab", font=("Segoe UI", 10, "bold"), padding=[14, 6])
+        style.configure("TFrame",        background=C_SECTION_BG)
 
         nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=0, pady=0)
+        nb.pack(fill="both", expand=True)
 
         tab1 = tk.Frame(nb, bg=C_SECTION_BG)
         nb.add(tab1, text="  Excel \u2192 P6  ")
@@ -133,14 +129,13 @@ class App(tk.Tk):
         nb.add(tab2, text="  MS Project \u2192 P6  ")
         self._build_msp_tab(tab2)
 
-        # ---- Shared log ----
+        # Shared log
         log_outer = tk.Frame(self, bg=C_SECTION_BG)
         log_outer.pack(fill="x", padx=12, pady=(4, 8))
 
         log_lf = tk.LabelFrame(log_outer, text="  Log  ",
                                 font=FONT_SECTION, bg=C_SECTION_BG,
-                                fg="#1F4E79", relief="groove", bd=2,
-                                labelanchor="nw")
+                                fg="#1F4E79", relief="groove", bd=2, labelanchor="nw")
         log_lf.pack(fill="x")
 
         log_frame = tk.Frame(log_lf, bg=C_LOG_BG)
@@ -150,9 +145,7 @@ class App(tk.Tk):
             log_frame, font=FONT_MONO,
             bg=C_LOG_BG, fg=C_LOG_FG,
             insertbackground=C_LOG_FG,
-            relief="flat", bd=0,
-            height=8, wrap="word",
-            state="disabled"
+            relief="flat", bd=0, height=8, wrap="word", state="disabled"
         )
         self._log.pack(fill="x")
         self._log.tag_configure("ok",   foreground=C_LOG_OK)
@@ -165,7 +158,7 @@ class App(tk.Tk):
                   ).pack(anchor="e", padx=8, pady=(0, 6))
 
     # ------------------------------------------------------------------
-    # Helper: scrollable frame inside a tab
+    # Helper: scrollable canvas + content frame inside a tab
     # ------------------------------------------------------------------
     def _make_scrollable(self, parent):
         canvas = tk.Canvas(parent, bg=C_SECTION_BG, highlightthickness=0)
@@ -186,17 +179,13 @@ class App(tk.Tk):
         return canvas, content
 
     # ------------------------------------------------------------------
-    # Helper: section LabelFrame
+    # Helpers: section frame, styled button, file row
     # ------------------------------------------------------------------
     def _section(self, parent, title):
         return tk.LabelFrame(parent, text=f"  {title}  ",
-                             font=FONT_SECTION,
-                             bg=C_SECTION_BG, fg="#1F4E79",
+                             font=FONT_SECTION, bg=C_SECTION_BG, fg="#1F4E79",
                              relief="groove", bd=2, labelanchor="nw")
 
-    # ------------------------------------------------------------------
-    # Helper: styled button
-    # ------------------------------------------------------------------
     def _btn(self, parent, text, cmd, bg=C_BTN_BG, abg=C_BTN_ACT,
              font=FONT_BODY, pady=4):
         b = tk.Button(parent, text=text, command=cmd,
@@ -207,9 +196,6 @@ class App(tk.Tk):
         b.bind("<Leave>", lambda e: b.configure(bg=bg))
         return b
 
-    # ------------------------------------------------------------------
-    # Helper: file row (Entry + Browse button)
-    # ------------------------------------------------------------------
     def _file_row(self, parent, var, browse_cmd):
         row = tk.Frame(parent, bg=C_SECTION_BG)
         row.pack(fill="x", padx=8, pady=(0, 6))
@@ -218,198 +204,6 @@ class App(tk.Tk):
         self._btn(row, "Browse\u2026", browse_cmd,
                   bg=C_BTN_BG, abg=C_BTN_ACT).pack(side="left", padx=(6, 0))
 
-    # ======================================================================
-    # EXCEL TAB
-    # ======================================================================
-    def _build_excel_tab(self, parent):
-        _, content = self._make_scrollable(parent)
-        pad = dict(padx=16, pady=8)
-
-        # Step 1
-        s1 = self._section(content, "Step 1 \u2014 P6 Reference File")
-        s1.pack(fill="x", **pad)
-        tk.Label(s1, text=(
-            "Export any project from P6: File \u2192 Export \u2192 Primavera P6 XML.\n"
-            "Rename the exported file and select it below."
-        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
-        ).pack(anchor="w", padx=8, pady=(4, 6))
-
-        self._file_row(s1, self._ref_var, self._browse_ref)
-
-        self._btn(s1, "Generate Template  (create_template.py)",
-                  self._run_generate,
-                  bg=C_GEN_BG, abg=C_GEN_ACT,
-                  font=("Segoe UI", 10, "bold"), pady=6
-                  ).pack(padx=8, pady=(2, 10), anchor="w")
-
-        # Step 2
-        s2 = self._section(content, "Step 2 \u2014 Convert Filled Template")
-        s2.pack(fill="x", **pad)
-        tk.Label(s2, text=(
-            "Open P6_Import_Template.xlsx, fill in your data, save, then select it below."
-        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
-        ).pack(anchor="w", padx=8, pady=(4, 6))
-
-        self._file_row(s2, self._template_var, self._browse_template)
-
-        self._btn(s2, "Convert to XML  (aurora_p6_converter.py)",
-                  self._run_convert,
-                  bg=C_CNV_BG, abg=C_CNV_ACT,
-                  font=("Segoe UI", 10, "bold"), pady=6
-                  ).pack(padx=8, pady=(2, 10), anchor="w")
-
-        # Step 3 — import instructions
-        s3 = self._section(content, "Step 3 \u2014 Import into P6 Professional 18.8")
-        s3.pack(fill="x", **pad)
-        self._instr_text(s3, (
-            "Pass 1 \u2014 Create New Project\n"
-            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
-            "  2. Select  P6_Import_pass1.xml\n"
-            "  3. Import action: Create New Project\n"
-            "  Imports: Project, WBS, Activities, Resources, ActivityCodes.\n"
-            "\n"
-            "Pass 2 \u2014 Add Relationships\n"
-            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
-            "  2. Select  P6_Import_pass2.xml\n"
-            "  3. Import action: Update Existing Project\n"
-            "  Imports: Activities (matched by ObjectId) + Relationships.\n"
-            "\n"
-            "Pass 3 \u2014 Add Resource Assignments\n"
-            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
-            "  2. Select  P6_Import_pass3.xml\n"
-            "  3. Import action: Update Existing Project\n"
-            "  Imports: Activities (matched by ObjectId) + ResourceAssignments.\n"
-            "\n"
-            "Important: All three passes must be imported in order. Do not skip Pass 1.\n"
-            "Pass 3 is only required if your template has ResourceAssignment rows."
-        ), height=19)
-
-    # ======================================================================
-    # MSP TAB
-    # ======================================================================
-    def _build_msp_tab(self, parent):
-        _, content = self._make_scrollable(parent)
-        pad = dict(padx=16, pady=8)
-
-        # ---- Section 1: MSP XML ----
-        s1 = self._section(content, "Step 1 \u2014 MS Project XML File")
-        s1.pack(fill="x", **pad)
-        tk.Label(s1, text=(
-            "Export your schedule from Microsoft Project:\n"
-            "  File \u2192 Save As \u2192 XML Format (*.xml)"
-        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
-        ).pack(anchor="w", padx=8, pady=(4, 6))
-
-        self._file_row(s1, self._msp_var, self._browse_msp)
-
-        # ---- Section 2: Reference file ----
-        s2 = self._section(content, "Step 2 \u2014 P6 Reference File")
-        s2.pack(fill="x", **pad)
-        tk.Label(s2, text=(
-            "Required: export any project from P6 (File \u2192 Export \u2192 Primavera P6 XML).\n"
-            "Provides Calendar, OBS, and EPS anchor for the new project.\n"
-            "Auto-detect searches the MS Project XML folder and the script folder."
-        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
-        ).pack(anchor="w", padx=8, pady=(4, 4))
-
-        ref_row = tk.Frame(s2, bg=C_SECTION_BG)
-        ref_row.pack(fill="x", padx=8, pady=(0, 8))
-        tk.Entry(ref_row, textvariable=self._msp_ref_var,
-                 font=FONT_BODY, width=48
-                 ).pack(side="left", fill="x", expand=True, ipady=3)
-        self._btn(ref_row, "Browse\u2026", self._browse_msp_ref,
-                  bg=C_BTN_BG, abg=C_BTN_ACT).pack(side="left", padx=(6, 0))
-        self._btn(ref_row, "Auto-detect", self._autodetect_msp_ref,
-                  bg="#555", abg="#333").pack(side="left", padx=(6, 0))
-
-        # ---- Section 3: Convert ----
-        s3 = self._section(content, "Step 3 \u2014 Convert to P6 XML")
-        s3.pack(fill="x", **pad)
-
-        self._btn(s3, "Convert to P6 XML  (msp_to_p6_converter.py)",
-                  self._run_msp_convert,
-                  bg=C_MSP_BG, abg=C_MSP_ACT,
-                  font=("Segoe UI", 10, "bold"), pady=6
-                  ).pack(padx=8, pady=(8, 6), anchor="w")
-
-        # Output file paths (updated after conversion)
-        out_frame = tk.Frame(s3, bg="#E8EEF4", relief="flat", bd=0)
-        out_frame.pack(fill="x", padx=8, pady=(0, 10))
-
-        tk.Label(out_frame, text="Output files:", font=FONT_SECTION,
-                 bg="#E8EEF4", fg="#1F4E79").pack(anchor="w", padx=8, pady=(6, 2))
-
-        self._msp_pass1_var = tk.StringVar(value="  (not yet generated)")
-        self._msp_pass2_var = tk.StringVar(value="  (not yet generated)")
-        self._msp_pass3_var = tk.StringVar(value="  (not yet generated)")
-
-        for label, var in [("Pass 1:", self._msp_pass1_var),
-                           ("Pass 2:", self._msp_pass2_var),
-                           ("Pass 3:", self._msp_pass3_var)]:
-            row = tk.Frame(out_frame, bg="#E8EEF4")
-            row.pack(fill="x", padx=8, pady=1)
-            tk.Label(row, text=label, font=FONT_SECTION, bg="#E8EEF4",
-                     fg="#555555", width=8, anchor="w").pack(side="left")
-            tk.Label(row, textvariable=var, font=FONT_PATH, bg="#E8EEF4",
-                     fg="#1A1A2E", anchor="w").pack(side="left", fill="x")
-
-        tk.Frame(out_frame, bg="#E8EEF4", height=6).pack()
-
-        # ---- Section 4: Rebind ----
-        s4 = self._section(content, "Step 4 \u2014 Rebind Pass 2 & 3  (after Pass 1 import)")
-        s4.pack(fill="x", **pad)
-        tk.Label(s4, text=(
-            "After importing Pass 1 into P6, P6 assigns its own internal ObjectIds.\n"
-            "Click Rebind to query the P6 SQL Server database and rewrite Pass 2 & 3\n"
-            "with the real ObjectIds so relationships and resources import correctly.\n"
-            "Requires SQL Server (PBZA) running on localhost."
-        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
-        ).pack(anchor="w", padx=8, pady=(4, 6))
-
-        self._rebind_btn = self._btn(
-            s4, "Rebind Pass2 & Pass3",
-            self._run_msp_rebind,
-            bg=C_RBD_BG, abg=C_RBD_ACT,
-            font=("Segoe UI", 10, "bold"), pady=6
-        )
-        self._rebind_btn.pack(padx=8, pady=(0, 10), anchor="w")
-        self._rebind_btn.configure(state="disabled",
-                                   bg=C_DISABLED, activebackground=C_DISABLED)
-        self._rebind_btn.unbind("<Enter>")
-        self._rebind_btn.unbind("<Leave>")
-
-        # ---- Section 5: Import instructions ----
-        s5 = self._section(content, "Step 5 \u2014 Import into P6 Professional 18.8")
-        s5.pack(fill="x", **pad)
-        self._instr_text(s5, (
-            "Pass 1 \u2014 Create New Project\n"
-            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
-            "  2. Select  {base}_P6_pass1.xml\n"
-            "  3. Import action: Create New Project\n"
-            "  Imports: Project, WBS, Activities, Resources.\n"
-            "\n"
-            "After Pass 1 import \u2014 click 'Rebind Pass2 & Pass3' (Step 4 above)\n"
-            "  This queries PBZA SQL Server for real ObjectIds assigned by P6.\n"
-            "  Pass 2 and Pass 3 files are rewritten with correct ObjectIds.\n"
-            "\n"
-            "Pass 2 \u2014 Add Relationships\n"
-            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
-            "  2. Select  {base}_P6_pass2.xml  (after Rebind)\n"
-            "  3. Import action: Update Existing Project\n"
-            "  Imports: Activities + Relationships.\n"
-            "\n"
-            "Pass 3 \u2014 Add Resource Assignments\n"
-            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
-            "  2. Select  {base}_P6_pass3.xml  (after Rebind)\n"
-            "  3. Import action: Update Existing Project\n"
-            "  Imports: Activities + ResourceAssignments.\n"
-            "\n"
-            "Important: Rebind must run after every Pass 1 import."
-        ), height=22)
-
-    # ------------------------------------------------------------------
-    # Helper: read-only text widget for instructions
-    # ------------------------------------------------------------------
     def _instr_text(self, parent, text, height=12):
         txt = tk.Text(parent, font=FONT_INSTR, bg="#EBF2FA", fg="#1A1A2E",
                       relief="flat", bd=0, height=height, wrap="word",
@@ -439,7 +233,59 @@ class App(tk.Tk):
         self._log.configure(state="disabled")
 
     # ------------------------------------------------------------------
-    # Copy p6_reference.xml to dest_dir
+    # Core: run a callable in a thread, capture print() to log
+    # ------------------------------------------------------------------
+    def _run_module_func(self, func, on_done, argv=None):
+        """
+        Run func() in a background thread with sys.argv=argv (if given).
+        Captures sys.stdout/stderr (print calls) and posts to the log widget.
+        Calls on_done(return_code) on the main thread when finished.
+        """
+        buf = []
+
+        class _Cap:
+            def write(self, text): buf.append(text)
+            def flush(self):       pass
+
+        def worker():
+            old_out, old_err, old_argv = sys.stdout, sys.stderr, sys.argv
+            sys.stdout = _Cap()
+            sys.stderr = _Cap()
+            if argv is not None:
+                sys.argv = argv
+            rc = 0
+            try:
+                func()
+            except SystemExit as e:
+                rc = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+            except Exception as exc:
+                import traceback
+                buf.append(f"ERROR: {exc}\n{traceback.format_exc()}")
+                rc = 1
+            finally:
+                sys.stdout = old_out
+                sys.stderr = old_err
+                sys.argv   = old_argv
+
+            output = "".join(buf)
+
+            def post():
+                for line in (output + "\n").splitlines(keepends=True):
+                    if not line.strip():
+                        continue
+                    tag = ("err"  if any(w in line.lower()
+                                         for w in ("error", "traceback", "exception"))
+                           else "warn" if "warn" in line.lower()
+                           else None)
+                    self._log_write(line, tag)
+                on_done(rc)
+
+            self.after(0, post)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Copy reference XML to dest_dir as p6_reference.xml
     # ------------------------------------------------------------------
     def _prepare_ref(self, ref_src, dest_dir, label="reference file"):
         ref_src = (ref_src or "").strip()
@@ -448,8 +294,7 @@ class App(tk.Tk):
                                  f"Please select a P6 reference XML file ({label}).")
             return False
         if not os.path.isfile(ref_src):
-            messagebox.showerror("File Not Found",
-                                 f"Reference file not found:\n{ref_src}")
+            messagebox.showerror("File Not Found", f"Reference file not found:\n{ref_src}")
             return False
         dest = os.path.join(dest_dir, "p6_reference.xml")
         if os.path.abspath(ref_src) != os.path.abspath(dest):
@@ -461,34 +306,67 @@ class App(tk.Tk):
                 return False
         return True
 
-    # ------------------------------------------------------------------
-    # Run subprocess in a thread, stream output to log
-    # ------------------------------------------------------------------
-    def _run_in_thread(self, cmd, cwd, on_done):
-        def worker():
-            self._log_line(f"Running: {' '.join(cmd)}", "info")
-            try:
-                proc = subprocess.Popen(
-                    cmd, cwd=cwd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True, encoding="utf-8", errors="replace"
-                )
-                for line in proc.stdout:
-                    tag = ("err"  if any(w in line.lower()
-                                         for w in ("error", "traceback", "exception"))
-                           else "warn" if "warn" in line.lower()
-                           else None)
-                    self.after(0, self._log_line, line, tag)
-                proc.wait()
-                self.after(0, on_done, proc.returncode)
-            except Exception as exc:
-                self.after(0, self._log_line, f"ERROR: {exc}\n", "err")
-                self.after(0, on_done, -1)
-        threading.Thread(target=worker, daemon=True).start()
+    # ======================================================================
+    # EXCEL TAB
+    # ======================================================================
+    def _build_excel_tab(self, parent):
+        _, content = self._make_scrollable(parent)
+        pad = dict(padx=16, pady=8)
+
+        s1 = self._section(content, "Step 1 \u2014 P6 Reference File")
+        s1.pack(fill="x", **pad)
+        tk.Label(s1, text=(
+            "Export any project from P6: File \u2192 Export \u2192 Primavera P6 XML.\n"
+            "Rename the exported file and select it below."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 6))
+        self._file_row(s1, self._ref_var, self._browse_ref)
+        self._btn(s1, "Generate Template  (create_template.py)",
+                  self._run_generate,
+                  bg=C_GEN_BG, abg=C_GEN_ACT,
+                  font=("Segoe UI", 10, "bold"), pady=6
+                  ).pack(padx=8, pady=(2, 10), anchor="w")
+
+        s2 = self._section(content, "Step 2 \u2014 Convert Filled Template")
+        s2.pack(fill="x", **pad)
+        tk.Label(s2, text=(
+            "Open P6_Import_Template.xlsx, fill in your data, save, then select it below."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 6))
+        self._file_row(s2, self._template_var, self._browse_template)
+        self._btn(s2, "Convert to XML  (aurora_p6_converter.py)",
+                  self._run_convert,
+                  bg=C_CNV_BG, abg=C_CNV_ACT,
+                  font=("Segoe UI", 10, "bold"), pady=6
+                  ).pack(padx=8, pady=(2, 10), anchor="w")
+
+        s3 = self._section(content, "Step 3 \u2014 Import into P6 Professional 18.8")
+        s3.pack(fill="x", **pad)
+        self._instr_text(s3, (
+            "Pass 1 \u2014 Create New Project\n"
+            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
+            "  2. Select  P6_Import_pass1.xml\n"
+            "  3. Import action: Create New Project\n"
+            "  Imports: Project, WBS, Activities, Resources, ActivityCodes.\n"
+            "\n"
+            "Pass 2 \u2014 Add Relationships\n"
+            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
+            "  2. Select  P6_Import_pass2.xml\n"
+            "  3. Import action: Update Existing Project\n"
+            "  Imports: Activities (matched by ObjectId) + Relationships.\n"
+            "\n"
+            "Pass 3 \u2014 Add Resource Assignments\n"
+            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
+            "  2. Select  P6_Import_pass3.xml\n"
+            "  3. Import action: Update Existing Project\n"
+            "  Imports: Activities (matched by ObjectId) + ResourceAssignments.\n"
+            "\n"
+            "Important: All three passes must be imported in order. Do not skip Pass 1.\n"
+            "Pass 3 is only required if your template has ResourceAssignment rows."
+        ), height=19)
 
     # ------------------------------------------------------------------
-    # Excel tab — file browsing
+    # Excel tab — file browsers
     # ------------------------------------------------------------------
     def _browse_ref(self):
         path = filedialog.askopenfilename(
@@ -510,14 +388,6 @@ class App(tk.Tk):
     # Excel tab — Generate Template
     # ------------------------------------------------------------------
     def _run_generate(self):
-        py = get_python()
-        if not py:
-            return
-        script = os.path.join(APP_DIR, "create_template.py")
-        if not os.path.isfile(script):
-            messagebox.showerror("Script Not Found",
-                                 f"create_template.py not found in:\n{APP_DIR}")
-            return
         work_dir = SCRIPTS_DIR
         if not self._prepare_ref(self._ref_var.get(), work_dir, "Step 1"):
             return
@@ -525,6 +395,7 @@ class App(tk.Tk):
 
         def done(rc):
             if rc == 0:
+                out = os.path.join(work_dir, "P6_Import_Template.xlsx")
                 self._log_line("Template generated successfully.", "ok")
                 messagebox.showinfo(
                     "Template Generated",
@@ -534,18 +405,14 @@ class App(tk.Tk):
             else:
                 self._log_line("Template generation failed. See log.", "err")
                 messagebox.showerror("Error",
-                                     "create_template.py exited with an error.\n"
-                                     "See the Log area for details.")
+                                     "create_template failed.\nSee the Log for details.")
 
-        self._run_in_thread([py, script], work_dir, done)
+        self._run_module_func(lambda: create_template.main(work_dir), done)
 
     # ------------------------------------------------------------------
     # Excel tab — Convert Template to XML
     # ------------------------------------------------------------------
     def _run_convert(self):
-        py = get_python()
-        if not py:
-            return
         template = self._template_var.get().strip()
         if not template:
             messagebox.showerror("Missing Template",
@@ -553,11 +420,6 @@ class App(tk.Tk):
             return
         if not os.path.isfile(template):
             messagebox.showerror("File Not Found", f"Template not found:\n{template}")
-            return
-        script = os.path.join(APP_DIR, "aurora_p6_converter.py")
-        if not os.path.isfile(script):
-            messagebox.showerror("Script Not Found",
-                                 f"aurora_p6_converter.py not found in:\n{APP_DIR}")
             return
         tmpl_dir = os.path.dirname(os.path.abspath(template))
         if not self._prepare_ref(self._ref_var.get(), tmpl_dir, "Step 1"):
@@ -578,13 +440,127 @@ class App(tk.Tk):
             else:
                 self._log_line("Conversion failed. See log.", "err")
                 messagebox.showerror("Error",
-                                     "aurora_p6_converter.py exited with an error.\n"
-                                     "See the Log area for details.")
+                                     "aurora_p6_converter failed.\nSee the Log for details.")
 
-        self._run_in_thread([py, script, template], tmpl_dir, done)
+        self._run_module_func(aurora_p6_converter.main, done,
+                              argv=["aurora_p6_converter", template])
+
+    # ======================================================================
+    # MSP TAB
+    # ======================================================================
+    def _build_msp_tab(self, parent):
+        _, content = self._make_scrollable(parent)
+        pad = dict(padx=16, pady=8)
+
+        s1 = self._section(content, "Step 1 \u2014 MS Project XML File")
+        s1.pack(fill="x", **pad)
+        tk.Label(s1, text=(
+            "Export your schedule from Microsoft Project:\n"
+            "  File \u2192 Save As \u2192 XML Format (*.xml)"
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 6))
+        self._file_row(s1, self._msp_var, self._browse_msp)
+
+        s2 = self._section(content, "Step 2 \u2014 P6 Reference File")
+        s2.pack(fill="x", **pad)
+        tk.Label(s2, text=(
+            "Required: export any project from P6 (File \u2192 Export \u2192 Primavera P6 XML).\n"
+            "Provides Calendar, OBS, and EPS anchor for the new project.\n"
+            "Auto-detect searches the MS Project XML folder and the script folder."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 4))
+
+        ref_row = tk.Frame(s2, bg=C_SECTION_BG)
+        ref_row.pack(fill="x", padx=8, pady=(0, 8))
+        tk.Entry(ref_row, textvariable=self._msp_ref_var,
+                 font=FONT_BODY, width=48
+                 ).pack(side="left", fill="x", expand=True, ipady=3)
+        self._btn(ref_row, "Browse\u2026", self._browse_msp_ref,
+                  bg=C_BTN_BG, abg=C_BTN_ACT).pack(side="left", padx=(6, 0))
+        self._btn(ref_row, "Auto-detect", self._autodetect_msp_ref,
+                  bg="#555", abg="#333").pack(side="left", padx=(6, 0))
+
+        s3 = self._section(content, "Step 3 \u2014 Convert to P6 XML")
+        s3.pack(fill="x", **pad)
+        self._btn(s3, "Convert to P6 XML  (msp_to_p6_converter.py)",
+                  self._run_msp_convert,
+                  bg=C_MSP_BG, abg=C_MSP_ACT,
+                  font=("Segoe UI", 10, "bold"), pady=6
+                  ).pack(padx=8, pady=(8, 6), anchor="w")
+
+        out_frame = tk.Frame(s3, bg="#E8EEF4", relief="flat", bd=0)
+        out_frame.pack(fill="x", padx=8, pady=(0, 10))
+        tk.Label(out_frame, text="Output files:", font=FONT_SECTION,
+                 bg="#E8EEF4", fg="#1F4E79").pack(anchor="w", padx=8, pady=(6, 2))
+
+        self._msp_pass1_var = tk.StringVar(value="  (not yet generated)")
+        self._msp_pass2_var = tk.StringVar(value="  (not yet generated)")
+        self._msp_pass3_var = tk.StringVar(value="  (not yet generated)")
+
+        for label, var in [("Pass 1:", self._msp_pass1_var),
+                           ("Pass 2:", self._msp_pass2_var),
+                           ("Pass 3:", self._msp_pass3_var)]:
+            row = tk.Frame(out_frame, bg="#E8EEF4")
+            row.pack(fill="x", padx=8, pady=1)
+            tk.Label(row, text=label, font=FONT_SECTION, bg="#E8EEF4",
+                     fg="#555555", width=8, anchor="w").pack(side="left")
+            tk.Label(row, textvariable=var, font=FONT_PATH, bg="#E8EEF4",
+                     fg="#1A1A2E", anchor="w").pack(side="left", fill="x")
+
+        tk.Frame(out_frame, bg="#E8EEF4", height=6).pack()
+
+        s4 = self._section(content, "Step 4 \u2014 Rebind Pass 2 & 3  (after Pass 1 import)")
+        s4.pack(fill="x", **pad)
+        tk.Label(s4, text=(
+            "After importing Pass 1 into P6, P6 assigns its own internal ObjectIds.\n"
+            "Click Rebind to query the P6 SQL Server database and rewrite Pass 2 & 3\n"
+            "with the real ObjectIds so relationships and resources import correctly.\n"
+            "Requires SQL Server (PBZA) running on localhost."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 6))
+
+        self._rebind_btn = self._btn(
+            s4, "Rebind Pass2 & Pass3",
+            self._run_msp_rebind,
+            bg=C_RBD_BG, abg=C_RBD_ACT,
+            font=("Segoe UI", 10, "bold"), pady=6
+        )
+        self._rebind_btn.pack(padx=8, pady=(0, 10), anchor="w")
+        self._rebind_btn.configure(state="disabled",
+                                   bg=C_DISABLED, activebackground=C_DISABLED)
+        self._rebind_btn.unbind("<Enter>")
+        self._rebind_btn.unbind("<Leave>")
+
+        s5 = self._section(content, "Step 5 \u2014 Import into P6 Professional 18.8")
+        s5.pack(fill="x", **pad)
+        self._instr_text(s5, (
+            "Pass 1 \u2014 Create New Project\n"
+            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
+            "  2. Select  {base}_P6_pass1.xml\n"
+            "  3. Import action: Create New Project\n"
+            "  Imports: Project, WBS, Activities, Resources.\n"
+            "\n"
+            "After Pass 1 import \u2014 click 'Rebind Pass2 & Pass3' (Step 4 above)\n"
+            "  This queries PBZA SQL Server for real ObjectIds assigned by P6.\n"
+            "  Pass 2 and Pass 3 files are rewritten with correct ObjectIds.\n"
+            "\n"
+            "Pass 2 \u2014 Add Relationships\n"
+            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
+            "  2. Select  {base}_P6_pass2.xml  (after Rebind)\n"
+            "  3. Import action: Update Existing Project\n"
+            "  Imports: Activities + Relationships.\n"
+            "\n"
+            "Pass 3 \u2014 Add Resource Assignments\n"
+            "  1. File \u2192 Import \u2192 Primavera P6 XML\n"
+            "  2. Select  {base}_P6_pass3.xml  (after Rebind)\n"
+            "  3. Import action: Update Existing Project\n"
+            "  Imports: Activities + ResourceAssignments.\n"
+            "\n"
+            "Important: Rebind must run after every Pass 1 import."
+        ), height=22)
 
     # ------------------------------------------------------------------
-    # MSP tab — file browsing
+    # MSP tab — file browsers
     # ------------------------------------------------------------------
     def _browse_msp(self):
         path = filedialog.askopenfilename(
@@ -604,15 +580,15 @@ class App(tk.Tk):
             self._msp_ref_var.set(path)
 
     def _autodetect_msp_ref(self):
-        """Look for p6_reference.xml near the MSP file or in script dir."""
         candidates = []
         msp = self._msp_var.get().strip()
         if msp:
             candidates.append(os.path.join(os.path.dirname(os.path.abspath(msp)),
                                            "p6_reference.xml"))
-        candidates.append(os.path.join(SCRIPTS_DIR, "p6_reference.xml"))
-        candidates.append(os.path.join(APP_DIR, "p6_reference.xml"))
-
+        candidates += [
+            os.path.join(SCRIPTS_DIR, "p6_reference.xml"),
+            os.path.join(APP_DIR,     "p6_reference.xml"),
+        ]
         for c in candidates:
             if os.path.isfile(c):
                 self._msp_ref_var.set(c)
@@ -624,25 +600,16 @@ class App(tk.Tk):
     # MSP tab — Convert
     # ------------------------------------------------------------------
     def _run_msp_convert(self):
-        py = get_python()
-        if not py:
-            return
-
         msp = self._msp_var.get().strip()
         if not msp:
-            messagebox.showerror("Missing File", "Please select an MS Project XML file (Step 1).")
+            messagebox.showerror("Missing File",
+                                 "Please select an MS Project XML file (Step 1).")
             return
         if not os.path.isfile(msp):
             messagebox.showerror("File Not Found", f"MS Project XML not found:\n{msp}")
             return
 
-        script = os.path.join(APP_DIR, "msp_to_p6_converter.py")
-        if not os.path.isfile(script):
-            messagebox.showerror("Script Not Found",
-                                 f"msp_to_p6_converter.py not found in:\n{APP_DIR}")
-            return
-
-        # p6_reference.xml must be in APP_DIR (script_dir) for the converter
+        # p6_reference.xml must live in APP_DIR (where the converter looks via __file__)
         if not self._prepare_ref(self._msp_ref_var.get(), APP_DIR, "Step 2"):
             return
 
@@ -663,10 +630,8 @@ class App(tk.Tk):
                 self._msp_out_dir = out_dir
                 self._msp_base    = base
 
-                # Enable rebind button
                 self._rebind_btn.configure(state="normal",
-                                           bg=C_RBD_BG,
-                                           activebackground=C_RBD_ACT)
+                                           bg=C_RBD_BG, activebackground=C_RBD_ACT)
                 self._rebind_btn.bind("<Enter>",
                                       lambda e: self._rebind_btn.configure(bg=C_RBD_ACT))
                 self._rebind_btn.bind("<Leave>",
@@ -684,10 +649,10 @@ class App(tk.Tk):
             else:
                 self._log_line("Conversion failed. See log.", "err")
                 messagebox.showerror("Error",
-                                     "msp_to_p6_converter.py exited with an error.\n"
-                                     "See the Log area for details.")
+                                     "msp_to_p6_converter failed.\nSee the Log for details.")
 
-        self._run_in_thread([py, script, msp, out_dir], APP_DIR, done)
+        self._run_module_func(msp_to_p6_converter.main, done,
+                              argv=["msp_to_p6_converter", msp, out_dir])
 
     # ------------------------------------------------------------------
     # MSP tab — Rebind
@@ -698,17 +663,6 @@ class App(tk.Tk):
                                  "Run Convert first (Step 3), then import Pass 1 into P6.")
             return
 
-        py = get_python()
-        if not py:
-            return
-
-        script = os.path.join(APP_DIR, "msp_to_p6_converter.py")
-        if not os.path.isfile(script):
-            messagebox.showerror("Script Not Found",
-                                 f"msp_to_p6_converter.py not found in:\n{APP_DIR}")
-            return
-
-        # Ensure reference is still in place
         if not self._prepare_ref(self._msp_ref_var.get(), APP_DIR, "Step 2"):
             return
 
@@ -728,8 +682,8 @@ class App(tk.Tk):
                 messagebox.showinfo(
                     "Rebind Complete",
                     f"Pass 2 and Pass 3 rewritten with real P6 ObjectIds.\n\n"
-                    f"  {base}_P6_pass2.xml  \u2014  Update Existing Project (Relationships)\n"
-                    f"  {base}_P6_pass3.xml  \u2014  Update Existing Project (ResourceAssignments)\n\n"
+                    f"  {base}_P6_pass2.xml  \u2014  Update Existing Project\n"
+                    f"  {base}_P6_pass3.xml  \u2014  Update Existing Project\n\n"
                     "Import Pass 2, then Pass 3 into P6."
                 )
             else:
@@ -737,12 +691,10 @@ class App(tk.Tk):
                 messagebox.showerror("Error",
                                      "Rebind failed.\n"
                                      "Ensure P6 SQL Server (PBZA) is running and Pass 1 was imported.\n"
-                                     "See the Log area for details.")
+                                     "See the Log for details.")
 
-        self._run_in_thread(
-            [py, script, msp_path, "--rebind", out_dir],
-            APP_DIR, done
-        )
+        self._run_module_func(msp_to_p6_converter.main, done,
+                              argv=["msp_to_p6_converter", msp_path, "--rebind", out_dir])
 
 
 # ---------------------------------------------------------------------------
