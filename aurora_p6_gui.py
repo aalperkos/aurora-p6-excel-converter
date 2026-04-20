@@ -33,6 +33,7 @@ if APP_DIR not in sys.path:
 import create_template
 import aurora_p6_converter
 import msp_to_p6_converter
+import msp_to_opc_converter
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +51,8 @@ C_CNV_BG     = "#1F4E79"
 C_CNV_ACT    = "#163759"
 C_MSP_BG     = "#5B4A9E"
 C_MSP_ACT    = "#42357A"
+C_OPC_BG     = "#1B6B3A"
+C_OPC_ACT    = "#134D2A"
 C_RBD_BG     = "#B85C00"
 C_RBD_ACT    = "#8A4400"
 C_LOG_BG     = "#1E1E1E"
@@ -91,6 +94,10 @@ class App(tk.Tk):
         self._msp_base     = None
         self._rebind_btn   = None
 
+        # OPC tab state
+        self._opc_msp_var  = tk.StringVar()
+        self._opc_ref_var  = tk.StringVar()
+
         self._build_ui()
         self._center_window(820, 860)
 
@@ -109,7 +116,7 @@ class App(tk.Tk):
         tk.Label(hdr, text="AURORA P6 Converter",
                  font=FONT_TITLE, bg=C_HEADER_BG, fg=C_HEADER_FG).pack()
         tk.Label(hdr,
-                 text="Excel \u2192 P6 XML  |  MS Project XML \u2192 P6 XML",
+                 text="Excel \u2192 P6 XML  |  MS Project XML \u2192 P6 XML  |  MS Project XML \u2192 OPC XML",
                  font=("Segoe UI", 9), bg=C_HEADER_BG, fg="#BDD7EE").pack()
 
         # Notebook
@@ -128,6 +135,10 @@ class App(tk.Tk):
         tab2 = tk.Frame(nb, bg=C_SECTION_BG)
         nb.add(tab2, text="  MS Project \u2192 P6  ")
         self._build_msp_tab(tab2)
+
+        tab3 = tk.Frame(nb, bg=C_SECTION_BG)
+        nb.add(tab3, text="  MS Project \u2192 OPC  ")
+        self._build_opc_tab(tab3)
 
         # Shared log
         log_outer = tk.Frame(self, bg=C_SECTION_BG)
@@ -695,6 +706,172 @@ class App(tk.Tk):
 
         self._run_module_func(msp_to_p6_converter.main, done,
                               argv=["msp_to_p6_converter", msp_path, "--rebind", out_dir])
+
+
+    # ======================================================================
+    # OPC TAB
+    # ======================================================================
+    def _build_opc_tab(self, parent):
+        _, content = self._make_scrollable(parent)
+        pad = dict(padx=16, pady=8)
+
+        s1 = self._section(content, "Step 1 \u2014 MS Project XML File")
+        s1.pack(fill="x", **pad)
+        tk.Label(s1, text=(
+            "Export your schedule from Microsoft Project:\n"
+            "  File \u2192 Save As \u2192 XML Format (*.xml)"
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 6))
+        self._file_row(s1, self._opc_msp_var, self._browse_opc_msp)
+
+        s2 = self._section(content, "Step 2 \u2014 P6 / OPC Reference File")
+        s2.pack(fill="x", **pad)
+        tk.Label(s2, text=(
+            "Required: export any project from P6 or OPC (File \u2192 Export \u2192 Primavera P6 XML).\n"
+            "Provides Calendar, OBS, and EPS anchor for the new project.\n"
+            "Auto-detect searches the MS Project XML folder and the script folder."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 4))
+
+        ref_row = tk.Frame(s2, bg=C_SECTION_BG)
+        ref_row.pack(fill="x", padx=8, pady=(0, 8))
+        tk.Entry(ref_row, textvariable=self._opc_ref_var,
+                 font=FONT_BODY, width=48
+                 ).pack(side="left", fill="x", expand=True, ipady=3)
+        self._btn(ref_row, "Browse\u2026", self._browse_opc_ref,
+                  bg=C_BTN_BG, abg=C_BTN_ACT).pack(side="left", padx=(6, 0))
+        self._btn(ref_row, "Auto-detect", self._autodetect_opc_ref,
+                  bg="#555", abg="#333").pack(side="left", padx=(6, 0))
+
+        s3 = self._section(content, "Step 3 \u2014 Convert to OPC XML")
+        s3.pack(fill="x", **pad)
+        tk.Label(s3, text=(
+            "Produces a single {name}_OPC.xml file ready to import into Oracle Primavera Cloud.\n"
+            "UDFType fields with Indicator or Formula data type are skipped automatically."
+        ), font=FONT_BODY, bg=C_SECTION_BG, justify="left", wraplength=680
+        ).pack(anchor="w", padx=8, pady=(4, 4))
+
+        self._btn(s3, "Convert to OPC XML  (msp_to_opc_converter.py)",
+                  self._run_opc_convert,
+                  bg=C_OPC_BG, abg=C_OPC_ACT,
+                  font=("Segoe UI", 10, "bold"), pady=6
+                  ).pack(padx=8, pady=(4, 6), anchor="w")
+
+        out_frame = tk.Frame(s3, bg="#E8EEF4", relief="flat", bd=0)
+        out_frame.pack(fill="x", padx=8, pady=(0, 10))
+        tk.Label(out_frame, text="Output file:", font=FONT_SECTION,
+                 bg="#E8EEF4", fg="#1F4E79").pack(anchor="w", padx=8, pady=(6, 2))
+
+        self._opc_out_var = tk.StringVar(value="  (not yet generated)")
+        row = tk.Frame(out_frame, bg="#E8EEF4")
+        row.pack(fill="x", padx=8, pady=1)
+        tk.Label(row, text="OPC:", font=FONT_SECTION, bg="#E8EEF4",
+                 fg="#555555", width=8, anchor="w").pack(side="left")
+        tk.Label(row, textvariable=self._opc_out_var, font=FONT_PATH,
+                 bg="#E8EEF4", fg="#1A1A2E", anchor="w").pack(side="left", fill="x")
+        tk.Frame(out_frame, bg="#E8EEF4", height=6).pack()
+
+        s4 = self._section(content, "Step 4 \u2014 Import into Oracle Primavera Cloud")
+        s4.pack(fill="x", **pad)
+        self._instr_text(s4, (
+            "Import the single OPC XML file into Oracle Primavera Cloud:\n"
+            "  1. Open your OPC project space\n"
+            "  2. Navigate to: Projects \u2192 Import\n"
+            "  3. Select  {name}_OPC.xml\n"
+            "  4. Follow the import wizard\n"
+            "\n"
+            "After import:\n"
+            "  \u26a0  Reschedule the project manually in OPC\n"
+            "  \u26a0  Recalculate costs manually in OPC\n"
+            "\n"
+            "Notes:\n"
+            "  \u2022  UDFType fields of type Indicator or Formula are not supported in OPC\n"
+            "     and are automatically excluded from the output file.\n"
+            "  \u2022  WBS Summary activity type is not used; summary tasks become WBS elements.\n"
+            "  \u2022  Project ID is truncated to 20 characters (OPC limit)."
+        ), height=16)
+
+    # ------------------------------------------------------------------
+    # OPC tab — file browsers
+    # ------------------------------------------------------------------
+    def _browse_opc_msp(self):
+        path = filedialog.askopenfilename(
+            title="Select MS Project XML file",
+            filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
+        )
+        if path:
+            self._opc_msp_var.set(path)
+            self._autodetect_opc_ref()
+
+    def _browse_opc_ref(self):
+        path = filedialog.askopenfilename(
+            title="Select P6 / OPC Reference XML",
+            filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
+        )
+        if path:
+            self._opc_ref_var.set(path)
+
+    def _autodetect_opc_ref(self):
+        candidates = []
+        msp = self._opc_msp_var.get().strip()
+        if msp:
+            candidates.append(os.path.join(os.path.dirname(os.path.abspath(msp)),
+                                           "p6_reference.xml"))
+        candidates += [
+            os.path.join(SCRIPTS_DIR, "p6_reference.xml"),
+            os.path.join(APP_DIR,     "p6_reference.xml"),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                self._opc_ref_var.set(c)
+                self._log_line(f"Auto-detected p6_reference.xml: {c}", "info")
+                return
+        self._log_line("Auto-detect: p6_reference.xml not found. Browse manually.", "warn")
+
+    # ------------------------------------------------------------------
+    # OPC tab — Convert
+    # ------------------------------------------------------------------
+    def _run_opc_convert(self):
+        msp = self._opc_msp_var.get().strip()
+        if not msp:
+            messagebox.showerror("Missing File",
+                                 "Please select an MS Project XML file (Step 1).")
+            return
+        if not os.path.isfile(msp):
+            messagebox.showerror("File Not Found", f"MS Project XML not found:\n{msp}")
+            return
+
+        if not self._prepare_ref(self._opc_ref_var.get(), APP_DIR, "Step 2"):
+            return
+
+        out_dir = os.path.dirname(os.path.abspath(msp))
+        base    = os.path.splitext(os.path.basename(msp))[0]
+        opc_out = os.path.join(out_dir, f"{base}_OPC.xml")
+
+        self._log_line("--- MSP Convert to OPC XML ---", "info")
+
+        def done(rc):
+            if rc == 0:
+                self._opc_out_var.set(opc_out)
+                self._log_line("Conversion complete.", "ok")
+                self._log_line(
+                    "[WARN] After OPC import: reschedule project and recalculate costs manually in OPC",
+                    "warn"
+                )
+                messagebox.showinfo(
+                    "Conversion Complete",
+                    f"OPC XML file created:\n{opc_out}\n\n"
+                    "After importing into Oracle Primavera Cloud:\n"
+                    "  \u26a0  Reschedule the project manually\n"
+                    "  \u26a0  Recalculate costs manually"
+                )
+            else:
+                self._log_line("Conversion failed. See log.", "err")
+                messagebox.showerror("Error",
+                                     "msp_to_opc_converter failed.\nSee the Log for details.")
+
+        self._run_module_func(msp_to_opc_converter.main, done,
+                              argv=["msp_to_opc_converter", msp, out_dir])
 
 
 # ---------------------------------------------------------------------------
